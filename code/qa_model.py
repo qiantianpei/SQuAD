@@ -152,10 +152,10 @@ class QAModel(object):
         context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
         
         context_emb_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * context_len, word_len, filters)
-        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
+        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
         
         context_emb_c_pool = tf.layers.max_pooling1d(inputs = context_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
-        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
+        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
         
         context_embs_c = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
 
@@ -164,10 +164,10 @@ class QAModel(object):
         qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
         
         qn_emb_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * question_len, word_len, filters)
-        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
+        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
         
         qn_emb_c_pool = tf.layers.max_pooling1d(inputs = qn_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
-        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
+        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
 
         qn_embs_c = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
         
@@ -373,7 +373,8 @@ class QAModel(object):
         # which are longer than our context_len or question_len.
         # We need to do this because if, for example, the true answer is cut
         # off the context, then the loss function is undefined.
-        for batch in get_batch_generator(self.word2id, self.char2id, dev_context_path, dev_qn_path, dev_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=True):
+        for batch in get_batch_generator(self.word2id, self.char2id, dev_context_path, dev_qn_path, dev_ans_path, self.FLAGS.batch_size, 
+            context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len = self.FLAGS.word_len, discard_long=True):
 
             # Get loss for this batch
             loss = self.get_loss(session, batch)
@@ -428,7 +429,8 @@ class QAModel(object):
 
         # Note here we select discard_long=False because we want to sample from the entire dataset
         # That means we're truncating, rather than discarding, examples with too-long context or questions
-        for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=False):
+        for batch in get_batch_generator(self.word2id, self.char2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, 
+            context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=False):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
 
@@ -511,7 +513,8 @@ class QAModel(object):
             epoch_tic = time.time()
 
             # Loop over batches
-            for batch in get_batch_generator(self.word2id, train_context_path, train_qn_path, train_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=True):
+            for batch in get_batch_generator(self.word2id, self.char2id, train_context_path, train_qn_path, train_ans_path, self.FLAGS.batch_size, 
+                context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len = self.FLAGS.word_len, discard_long=True):
 
                 # Run training iteration
                 iter_tic = time.time()

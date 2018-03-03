@@ -21,6 +21,7 @@ from __future__ import division
 import random
 import time
 import re
+import copy
 
 import numpy as np
 from six.moves import xrange
@@ -107,7 +108,7 @@ def padded(token_batch, batch_pad=0):
 def padded_c(token_batch_c, sentence_len, word_len):
     pad_word = [[PAD_ID] * word_len]
     pad_char = [PAD_ID]
-    result = copy.deepcopy(token_batch_c)
+    result = list(copy.deepcopy(token_batch_c))
     for i in range(len(token_batch_c)):
         sentence = token_batch_c[i]
         for j in range(len(sentence)):
@@ -145,7 +146,7 @@ def refill_batches(batches, word2id, char2id, context_file, qn_file, ans_file, b
         qn_tokens, qn_ids = sentence_to_token_ids(qn_line, word2id)
         ans_span = intstr_to_intlist(ans_line)
 
-        context_ids_c = tokens_to_char_ids(context_tokens, char2id)
+        context_ids_c = tokens_to_char_ids(context_tokens, char2id, word_len)
         qn_ids_c = tokens_to_char_ids(qn_tokens, char2id, word_len)
 
         # read the next line from each file
@@ -175,7 +176,7 @@ def refill_batches(batches, word2id, char2id, context_file, qn_file, ans_file, b
                 context_ids_c = context_ids_c[:context_len]
 
         # add to examples
-        examples.append((context_ids, context_tokens, context_tokens_c, qn_ids, qn_tokens, qn_tokens_c, ans_span, ans_tokens))
+        examples.append((context_ids, context_tokens, context_ids_c, qn_ids, qn_tokens, qn_ids_c, ans_span, ans_tokens))
 
         # stop refilling if you have 160 batches
         if len(examples) == batch_size * 160:
@@ -191,9 +192,9 @@ def refill_batches(batches, word2id, char2id, context_file, qn_file, ans_file, b
     for batch_start in xrange(0, len(examples), batch_size):
 
         # Note: each of these is a list length batch_size of lists of ints (except on last iter when it might be less than batch_size)
-        context_ids_batch, context_tokens_batch, context_tokens_c_batch, qn_ids_batch, qn_tokens_batch, qn_tokens_c_batch, ans_span_batch, ans_tokens_batch = zip(*examples[batch_start:batch_start+batch_size])
+        context_ids_batch, context_tokens_batch, context_ids_c_batch, qn_ids_batch, qn_tokens_batch, qn_ids_c_batch, ans_span_batch, ans_tokens_batch = zip(*examples[batch_start:batch_start+batch_size])
 
-        batches.append((context_ids_batch, context_tokens_batch, context_tokens_c_batch, qn_ids_batch, qn_tokens_batch, qn_tokens_c_batch, ans_span_batch, ans_tokens_batch))
+        batches.append((context_ids_batch, context_tokens_batch, context_ids_c_batch, qn_ids_batch, qn_tokens_batch, qn_ids_c_batch, ans_span_batch, ans_tokens_batch))
 
     # shuffle the batches
     random.shuffle(batches)
@@ -227,10 +228,11 @@ def get_batch_generator(word2id, char2id, context_path, qn_path, ans_path, batch
             break
 
         # Get next batch. These are all lists length batch_size
-        (context_ids, context_tokens, context_tokens_c, qn_ids, qn_tokens, qn_tokens_c, ans_span, ans_tokens) = batches.pop(0)
+        (context_ids, context_tokens, context_ids_c, qn_ids, qn_tokens, qn_ids_c, ans_span, ans_tokens) = batches.pop(0)
 
         # Pad context_ids and qn_ids
         qn_ids = padded(qn_ids, question_len) # pad questions to length question_len
+        print qn_ids
         context_ids = padded(context_ids, context_len) # pad contexts to length context_len
 
         # Make qn_ids into a np array and create qn_mask

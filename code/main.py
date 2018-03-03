@@ -28,6 +28,7 @@ import tensorflow as tf
 from qa_model import QAModel
 from vocab import get_glove
 from official_eval_helper import get_json_data, generate_answers
+from data_batcher import get_batch_generator
 
 
 logging.basicConfig(level=logging.INFO)
@@ -136,6 +137,13 @@ def main(unused_argv):
     dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
     dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
     dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
+
+    ##### test
+    for batch in get_batch_generator(word2id, char2id, train_context_path, train_qn_path, train_ans_path, FLAGS.batch_size, FLAGS.context_len, FLAGS.question_len, FLAGS.word_len, discard_long=True):
+        print batch.context_ids_c.shape
+        print batch.qn_ids_c.shape
+        return
+    #####
 
     # Initialize model
     qa_model = QAModel(FLAGS, id2word, word2id, emb_matrix, char2id, id2char)
