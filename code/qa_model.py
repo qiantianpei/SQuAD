@@ -97,7 +97,7 @@ class QAModel(object):
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
 
-    def add_embedding_layer(self, emb_matrix):
+    def add_embedding_layer(self, emb_matrix_w, emb_matrix_c):
         """
         Adds word embedding layer to the graph.
 
@@ -109,11 +109,20 @@ class QAModel(object):
 
             # Note: the embedding matrix is a tf.constant which means it's not a trainable parameter
             embedding_matrix = tf.constant(emb_matrix, dtype=tf.float32, name="emb_matrix") # shape (400002, embedding_size)
+            
+            ##### my change
+            embedding_matrix_c = tf.Variable(emb_matrix_c, dtype=tf.float32, name="emb_matrix") # shape (400002, embedding_size)
+            ##### 
 
             # Get the word embeddings for the context and question,
             # using the placeholders self.context_ids and self.qn_ids
             self.context_embs = embedding_ops.embedding_lookup(embedding_matrix, self.context_ids) # shape (batch_size, context_len, embedding_size)
             self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
+
+            ##### my change
+            self.context_embs_c_raw = embedding_ops.embedding_lookup(embedding_matrix_c, self.context_ids_c) # shape (batch_size, context_len, word_len, embedding_size)
+            self.qn_embs_c_raw = embedding_ops.embedding_lookup(embedding_matrix_c, self.qn_ids_c) # shape (batch_size, question_len, word_len, embedding_size)
+            ##### 
 
 
     def build_graph(self):
@@ -130,9 +139,29 @@ class QAModel(object):
         # Use a RNN to get hidden states for the context and the question
         # Note: here the RNNEncoder is shared (i.e. the weights are the same)
         # between the context and the question.
+
+
+        ##### my change: character-level CNN
+        context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size]) # shape (batch_size * context_len, word_len, embedding_size)
+        context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
+        context_emb_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * context_len, word_len, filters)
+        context_emb_c_pool = tf.layers.max_pooling1d(inputs = context_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
+        context_embs_c = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
+
+        tf.get_variable_scope().reuse_variables()
+        qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size]) # shape (batch_size * question_len, word_len, embedding_size)
+        qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
+        qn_emb_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * question_len, word_len, filters)
+        qn_emb_c_pool = tf.layers.max_pooling1d(inputs = qn_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
+        qn_embs_c = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
+        
+        context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
+        qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
+        #####
+
         encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+        context_hiddens = encoder.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
+        question_hiddens = encoder.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
         # Use context hidden states to attend to question hidden states
         attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
@@ -218,6 +247,11 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
+
+        ##### my change
+        input_feed[self.context_ids_c] = batch.context_ids_c
+        input_feed[self.qn_ids_c] = batch.qn_ids_c
+        #####
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
