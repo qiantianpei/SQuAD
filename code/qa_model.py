@@ -38,7 +38,7 @@ logging.basicConfig(level=logging.INFO)
 class QAModel(object):
     """Top-level Question Answering module"""
 
-    def __init__(self, FLAGS, id2word, word2id, emb_matrix):
+    def __init__(self, FLAGS, id2word, word2id, emb_matrix, char2id, id2char):
         """
         Initializes the QA model.
 
@@ -52,6 +52,8 @@ class QAModel(object):
         self.FLAGS = FLAGS
         self.id2word = id2word
         self.word2id = word2id
+        self.char2id = char2id
+        self.id2char = id2char
 
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
@@ -92,12 +94,15 @@ class QAModel(object):
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
 
+        self.context_c_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
+        self.qn_c_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len, self.FLAGS.word_len])
+
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
 
-    def add_embedding_layer(self, emb_matrix_w, emb_matrix_c):
+    def add_embedding_layer(self, emb_matrix, emb_matrix_c):
         """
         Adds word embedding layer to the graph.
 
@@ -111,7 +116,8 @@ class QAModel(object):
             embedding_matrix = tf.constant(emb_matrix, dtype=tf.float32, name="emb_matrix") # shape (400002, embedding_size)
             
             ##### my change
-            embedding_matrix_c = tf.Variable(emb_matrix_c, dtype=tf.float32, name="emb_matrix") # shape (400002, embedding_size)
+            embedding_matrix_c = tf.get_variable("emb_matrix_c", dtype=tf.float32, 
+                shape = [len(self.char2id), self.FLAGS.config.embedding_size_c], initializer=tf.contrib.layers.xavier_initializer())
             ##### 
 
             # Get the word embeddings for the context and question,
@@ -144,15 +150,25 @@ class QAModel(object):
         ##### my change: character-level CNN
         context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size]) # shape (batch_size * context_len, word_len, embedding_size)
         context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
+        
         context_emb_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * context_len, word_len, filters)
+        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
+        
         context_emb_c_pool = tf.layers.max_pooling1d(inputs = context_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
+        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
+        
         context_embs_c = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
 
         tf.get_variable_scope().reuse_variables()
         qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size]) # shape (batch_size * question_len, word_len, embedding_size)
         qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
+        
         qn_emb_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * question_len, word_len, filters)
+        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
+        
         qn_emb_c_pool = tf.layers.max_pooling1d(inputs = qn_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
+        assert context_embs_c.shape = [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
+
         qn_embs_c = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
         
         context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
@@ -357,7 +373,7 @@ class QAModel(object):
         # which are longer than our context_len or question_len.
         # We need to do this because if, for example, the true answer is cut
         # off the context, then the loss function is undefined.
-        for batch in get_batch_generator(self.word2id, dev_context_path, dev_qn_path, dev_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=True):
+        for batch in get_batch_generator(self.word2id, self.char2id, dev_context_path, dev_qn_path, dev_ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=True):
 
             # Get loss for this batch
             loss = self.get_loss(session, batch)
@@ -412,7 +428,7 @@ class QAModel(object):
 
         # Note here we select discard_long=False because we want to sample from the entire dataset
         # That means we're truncating, rather than discarding, examples with too-long context or questions
-        for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=False):
+        for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=False):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
 

@@ -28,7 +28,7 @@ PAD_ID = 0
 UNK_ID = 1
 
 
-def get_glove(glove_path, glove_dim):
+def get_glove(glove_path, glove_dim, char_dim):
     """Reads from original GloVe .txt file and returns embedding matrix and
     mappings from words to word ids.
 
@@ -51,6 +51,9 @@ def get_glove(glove_path, glove_dim):
     word2id = {}
     id2word = {}
 
+    char2id = {chr(i):(i - 30) for i in xrange(32,127)}
+    id2char = {(i - 30):chr(i) for i in xrange(32,127)}
+
     random_init = True
     # randomly initialize the special tokens
     if random_init:
@@ -61,6 +64,8 @@ def get_glove(glove_path, glove_dim):
     for word in _START_VOCAB:
         word2id[word] = idx
         id2word[idx] = word
+        char2id[word] = idx
+        id2char[idx] = word
         idx += 1
 
     # go through glove vecs
@@ -81,4 +86,4 @@ def get_glove(glove_path, glove_dim):
     assert len(id2word) == final_vocab_size
     assert idx == final_vocab_size
 
-    return emb_matrix, word2id, id2word
+    return emb_matrix, word2id, id2word, char2id, id2char
