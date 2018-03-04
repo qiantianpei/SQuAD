@@ -160,7 +160,7 @@ class QAModel(object):
         context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
         #assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
 
-        #tf.get_variable_scope().reuse_variables()
+        tf.get_variable_scope().reuse_variables()
         qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
         qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
         
