@@ -131,18 +131,26 @@ def main(unused_argv):
     emb_matrix, word2id, id2word, char2id, id2char = get_glove(FLAGS.glove_path, FLAGS.embedding_size, FLAGS.embedding_size_c)
 
     # Get filepaths to train/dev datafiles for tokenized queries, contexts and answers
-    train_context_path = os.path.join(FLAGS.data_dir, "train.context")
-    train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
-    train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
+    # train_context_path = os.path.join(FLAGS.data_dir, "train.context")
+    # train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
+    # train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
+
+    train_context_path = os.path.join(FLAGS.data_dir, "small.context")
+    train_qn_path = os.path.join(FLAGS.data_dir, "small.question")
+    train_ans_path = os.path.join(FLAGS.data_dir, "small.span")
+
+
     dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
     dev_qn_path = os.path.join(FLAGS.data_dir, "dev.question")
     dev_ans_path = os.path.join(FLAGS.data_dir, "dev.span")
 
     ##### test
-    for batch in get_batch_generator(word2id, char2id, train_context_path, train_qn_path, train_ans_path, FLAGS.batch_size, FLAGS.context_len, FLAGS.question_len, FLAGS.word_len, discard_long=True):
-        print batch.context_ids_c.shape
-        print batch.qn_ids_c.shape
-        return
+    # for batch in get_batch_generator(word2id, char2id, train_context_path, train_qn_path, train_ans_path, FLAGS.batch_size, FLAGS.context_len, FLAGS.question_len, FLAGS.word_len, discard_long=True):
+    #     print [id2word[w] for b in batch.qn_ids[0:2] for w in b]
+    #     print [id2word[w] for b in batch.qn_ids[0:2] for w in b]
+    #     print [id2char[c] for b in batch.context_ids_c[0:2] for w in b for c in w]
+    #     print [id2char[c] for b in batch.qn_ids_c[0:2] for w in b for c in w]
+    #     return
     #####
 
     # Initialize model

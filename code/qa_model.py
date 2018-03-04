@@ -88,21 +88,21 @@ class QAModel(object):
         # Add placeholders for inputs.
         # These are all batch-first: the None corresponds to batch_size and
         # allows you to run the same model with variable batch_size
-        self.context_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len])
-        self.context_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len])
-        self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
-        self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
-        self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
+        self.context_ids = tf.placeholder(tf.int32, shape=[self.FLAGS.batch_size, self.FLAGS.context_len])
+        self.context_mask = tf.placeholder(tf.int32, shape=[self.FLAGS.batch_size, self.FLAGS.context_len])
+        self.qn_ids = tf.placeholder(tf.int32, shape=[self.FLAGS.batch_size, self.FLAGS.question_len])
+        self.qn_mask = tf.placeholder(tf.int32, shape=[self.FLAGS.batch_size, self.FLAGS.question_len])
+        self.ans_span = tf.placeholder(tf.int32, shape=[self.FLAGS.batch_size, 2])
 
-        self.context_c_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.context_len, self.FLAGS.word_len])
-        self.qn_c_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len, self.FLAGS.word_len])
+        self.context_ids_c = tf.placeholder(tf.int32, shape=[self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.word_len])
+        self.qn_ids_c = tf.placeholder(tf.int32, shape=[self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.word_len])
 
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
         self.keep_prob = tf.placeholder_with_default(1.0, shape=())
 
 
-    def add_embedding_layer(self, emb_matrix, emb_matrix_c):
+    def add_embedding_layer(self, emb_matrix):
         """
         Adds word embedding layer to the graph.
 
@@ -117,7 +117,7 @@ class QAModel(object):
             
             ##### my change
             embedding_matrix_c = tf.get_variable("emb_matrix_c", dtype=tf.float32, 
-                shape = [len(self.char2id), self.FLAGS.config.embedding_size_c], initializer=tf.contrib.layers.xavier_initializer())
+                shape = [len(self.char2id), self.FLAGS.embedding_size_c], initializer=tf.contrib.layers.xavier_initializer())
             ##### 
 
             # Get the word embeddings for the context and question,
@@ -126,8 +126,8 @@ class QAModel(object):
             self.qn_embs = embedding_ops.embedding_lookup(embedding_matrix, self.qn_ids) # shape (batch_size, question_len, embedding_size)
 
             ##### my change
-            self.context_embs_c_raw = embedding_ops.embedding_lookup(embedding_matrix_c, self.context_ids_c) # shape (batch_size, context_len, word_len, embedding_size)
-            self.qn_embs_c_raw = embedding_ops.embedding_lookup(embedding_matrix_c, self.qn_ids_c) # shape (batch_size, question_len, word_len, embedding_size)
+            self.context_embs_c_raw = embedding_ops.embedding_lookup(embedding_matrix_c, self.context_ids_c) # shape (batch_size, context_len, word_len, embedding_size_c)
+            self.qn_embs_c_raw = embedding_ops.embedding_lookup(embedding_matrix_c, self.qn_ids_c) # shape (batch_size, question_len, word_len, embedding_size_c)
             ##### 
 
 
@@ -148,29 +148,31 @@ class QAModel(object):
 
 
         ##### my change: character-level CNN
-        context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size]) # shape (batch_size * context_len, word_len, embedding_size)
+        context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * context_len, word_len, embedding_size)
         context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
         
-        context_emb_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * context_len, word_len, filters)
-        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
+        context_embs_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * context_len, word_len, filters)
+        assert context_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
         
-        context_emb_c_pool = tf.layers.max_pooling1d(inputs = context_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
-        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
+        context_embs_c_pool = tf.layers.max_pooling1d(inputs = context_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
+        assert context_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
         
-        context_embs_c = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
+        context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
+        assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
 
-        tf.get_variable_scope().reuse_variables()
-        qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size]) # shape (batch_size * question_len, word_len, embedding_size)
+        #tf.get_variable_scope().reuse_variables()
+        qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
         qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
         
-        qn_emb_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * question_len, word_len, filters)
-        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
+        qn_embs_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * question_len, word_len, filters)
+        assert qn_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
         
-        qn_emb_c_pool = tf.layers.max_pooling1d(inputs = qn_emb_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
-        assert context_embs_c.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
+        qn_embs_c_pool = tf.layers.max_pooling1d(inputs = qn_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
+        assert qn_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
 
-        qn_embs_c = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
-        
+        qn_embs_c = tf.reshape(qn_embs_c_pool, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
+        assert qn_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.filters]
+
         context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
         qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         #####
