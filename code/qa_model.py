@@ -151,7 +151,7 @@ class QAModel(object):
         context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * context_len, word_len, embedding_size)
         context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
         
-        context_embs_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * context_len, word_len, filters)
+        context_embs_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = None) # shape (batch_size * context_len, word_len, filters)
         #assert context_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
         
         context_embs_c_pool = tf.layers.max_pooling1d(inputs = context_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
@@ -160,11 +160,11 @@ class QAModel(object):
         context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
         #assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
 
-        tf.get_variable_scope().reuse_variables()
+        #tf.get_variable_scope().reuse_variables()
         qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
         qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
         
-        qn_embs_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same') # shape (batch_size * question_len, word_len, filters)
+        qn_embs_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = True) # shape (batch_size * question_len, word_len, filters)
         #assert qn_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
         
         qn_embs_c_pool = tf.layers.max_pooling1d(inputs = qn_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
@@ -303,6 +303,11 @@ class QAModel(object):
         input_feed[self.ans_span] = batch.ans_span
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
+        ##### my change
+        input_feed[self.context_ids_c] = batch.context_ids_c
+        input_feed[self.qn_ids_c] = batch.qn_ids_c
+        #####
+
         output_feed = [self.loss]
 
         [loss] = session.run(output_feed, input_feed)
@@ -327,6 +332,11 @@ class QAModel(object):
         input_feed[self.qn_ids] = batch.qn_ids
         input_feed[self.qn_mask] = batch.qn_mask
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
+
+        ##### my change
+        input_feed[self.context_ids_c] = batch.context_ids_c
+        input_feed[self.qn_ids_c] = batch.qn_ids_c
+        #####
 
         output_feed = [self.probdist_start, self.probdist_end]
         [probdist_start, probdist_end] = session.run(output_feed, input_feed)
