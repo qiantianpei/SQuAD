@@ -135,9 +135,9 @@ def main(unused_argv):
     # train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
     # train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
 
-    train_context_path = os.path.join(FLAGS.data_dir, "small.context")
-    train_qn_path = os.path.join(FLAGS.data_dir, "small.question")
-    train_ans_path = os.path.join(FLAGS.data_dir, "small.span")
+    train_context_path = os.path.join(FLAGS.data_dir, "train.context")
+    train_qn_path = os.path.join(FLAGS.data_dir, "train.question")
+    train_ans_path = os.path.join(FLAGS.data_dir, "train.span")
 
 
     dev_context_path = os.path.join(FLAGS.data_dir, "dev.context")
