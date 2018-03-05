@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, MultiAtten
 
 logging.basicConfig(level=logging.INFO)
 
@@ -148,42 +148,70 @@ class QAModel(object):
 
 
         ##### my change: character-level CNN
-        context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * context_len, word_len, embedding_size)
-        context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
-        
-        context_embs_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = None) # shape (batch_size * context_len, word_len, filters)
-        #assert context_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
-        
-        context_embs_c_pool = tf.layers.max_pooling1d(inputs = context_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
-        #assert context_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
-        
-        context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
-        #assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
+        with vs.variable_scope("CharCNN"):
+            context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * context_len, word_len, embedding_size)
+            context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
+            
+            context_embs_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = None) # shape (batch_size * context_len, word_len, filters)
+            #assert context_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
+            
+            context_embs_c_pool = tf.layers.max_pooling1d(inputs = context_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
+            #assert context_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
+            
+            context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
+            #assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
 
-        #tf.get_variable_scope().reuse_variables()
-        qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
-        qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
-        
-        qn_embs_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = True) # shape (batch_size * question_len, word_len, filters)
-        #assert qn_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
-        
-        qn_embs_c_pool = tf.layers.max_pooling1d(inputs = qn_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
-        #assert qn_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
+            #tf.get_variable_scope().reuse_variables()
+            qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
+            qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
+            
+            qn_embs_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = True) # shape (batch_size * question_len, word_len, filters)
+            #assert qn_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
+            
+            qn_embs_c_pool = tf.layers.max_pooling1d(inputs = qn_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
+            #assert qn_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
 
-        qn_embs_c = tf.reshape(qn_embs_c_pool, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
-        #assert qn_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.filters]
+            qn_embs_c = tf.reshape(qn_embs_c_pool, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
+            #assert qn_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.filters]
 
-        context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
-        qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
+            context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
+            qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         #####
 
-        encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        context_hiddens = encoder.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
-        question_hiddens = encoder.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+        with vs.variable_scope("QUESTION AND PASSAGE ENCODER"):
+            encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            # encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            # encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
 
-        # Use context hidden states to attend to question hidden states
-        attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
+            context_hiddens = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
+            question_hiddens = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+
+        with vs.variable_scope("GATED ATTENTION-BASED RECURRENT NETWORKS"):
+            attn_layer_gated = MultiAtten(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            _, atten_output_gated = atten.layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size*2)
+            
+            gate_unact = tf.concat([atten_output_gated, context_hiddens], axis = 2) # (batch_size, context_len, hidden_size * 4)
+            assert gate_unact.shape[1:] == [self.FLAGS.context_len, self.FLAGS.hidden_size * 4]
+            gate = tf.contrib.layers.fully_connected(gate_unact, num_outputs = self.FLAGS.hidden_size * 4, , activation_fn=tf.nn.sigmoid)
+
+            encoder_gated = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob) 
+            context_hiddens_gated = encoder_gated.build_graph(gate * gate_unact, self.qn_mask) # (batch_size, context_len, hidden_size*2)
+        
+
+        with vs.variable_scope("SELF-MATCHING ATTENTION"): 
+            attn_layer_self = MultiAtten(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            _, atten_output_self = atten.layer_self.build_graph(context_hiddens_gated, self.context_mask, context_hiddens_gated)
+
+            gate2_unact = tf.concat([atten_output_self, context_hiddens_gated], axis = 2) # (batch_size, context_len, hidden_size * 4)
+            assert gate_unact.shape[1:] == [self.FLAGS.context_len, self.FLAGS.hidden_size * 4]
+            gate2 = tf.contrib.layers.fully_connected(gate2_unact, num_outputs = self.FLAGS.hidden_size * 4, , activation_fn=tf.nn.sigmoid)
+
+            encoder_self = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob) 
+            context_hiddens_self = encoder_self.build_graph(gate2 * gate2_unact, self.context_mask) # (batch_size, context_len, hidden_size*2)
+
+        # # Use context hidden states to attend to question hidden states
+        # attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+        # _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
 
         # Concat attn_output to context_hiddens to get blended_reps
         blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
