@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, MultiAtten
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, MultiAttn
 
 logging.basicConfig(level=logging.INFO)
 
@@ -178,7 +178,7 @@ class QAModel(object):
             qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         #####
 
-        with vs.variable_scope("QUESTION AND PASSAGE ENCODER"):
+        with vs.variable_scope("QPEncoder"):
             encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             # encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             # encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
@@ -186,25 +186,25 @@ class QAModel(object):
             context_hiddens = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
             question_hiddens = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
 
-        with vs.variable_scope("GATED ATTENTION-BASED RECURRENT NETWORKS"):
-            attn_layer_gated = MultiAtten(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            _, atten_output_gated = atten.layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size*2)
+        with vs.variable_scope("GatedAttn"):
+            attn_layer_gated = MultiAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            _, attn_output_gated = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size*2)
             
-            gate_unact = tf.concat([atten_output_gated, context_hiddens], axis = 2) # (batch_size, context_len, hidden_size * 4)
+            gate_unact = tf.concat([attn_output_gated, context_hiddens], axis = 2) # (batch_size, context_len, hidden_size * 4)
             assert gate_unact.shape[1:] == [self.FLAGS.context_len, self.FLAGS.hidden_size * 4]
-            gate = tf.contrib.layers.fully_connected(gate_unact, num_outputs = self.FLAGS.hidden_size * 4, , activation_fn=tf.nn.sigmoid)
+            gate = tf.contrib.layers.fully_connected(gate_unact, num_outputs = self.FLAGS.hidden_size * 4, activation_fn=tf.nn.sigmoid)
 
             encoder_gated = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob) 
             context_hiddens_gated = encoder_gated.build_graph(gate * gate_unact, self.qn_mask) # (batch_size, context_len, hidden_size*2)
         
 
-        with vs.variable_scope("SELF-MATCHING ATTENTION"): 
-            attn_layer_self = MultiAtten(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            _, atten_output_self = atten.layer_self.build_graph(context_hiddens_gated, self.context_mask, context_hiddens_gated)
+        with vs.variable_scope("SelfAttn"): 
+            attn_layer_self = MultiAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            _, attn_output_self = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask, context_hiddens_gated)
 
-            gate2_unact = tf.concat([atten_output_self, context_hiddens_gated], axis = 2) # (batch_size, context_len, hidden_size * 4)
+            gate2_unact = tf.concat([attn_output_self, context_hiddens_gated], axis = 2) # (batch_size, context_len, hidden_size * 4)
             assert gate_unact.shape[1:] == [self.FLAGS.context_len, self.FLAGS.hidden_size * 4]
-            gate2 = tf.contrib.layers.fully_connected(gate2_unact, num_outputs = self.FLAGS.hidden_size * 4, , activation_fn=tf.nn.sigmoid)
+            gate2 = tf.contrib.layers.fully_connected(gate2_unact, num_outputs = self.FLAGS.hidden_size * 4, activation_fn=tf.nn.sigmoid)
 
             encoder_self = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob) 
             context_hiddens_self = encoder_self.build_graph(gate2 * gate2_unact, self.context_mask) # (batch_size, context_len, hidden_size*2)
@@ -214,13 +214,14 @@ class QAModel(object):
         # _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
 
         # Concat attn_output to context_hiddens to get blended_reps
-        blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
+        #blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
 
         # Apply fully connected layer to each blended representation
         # Note, blended_reps_final corresponds to b' in the handout
         # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
-        blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
-
+        
+        #blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
+        blended_reps_final = tf.contrib.layers.fully_connected(context_hiddens_self, num_outputs=self.FLAGS.hidden_size) 
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         with vs.variable_scope("StartDist"):

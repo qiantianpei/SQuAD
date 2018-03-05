@@ -224,10 +224,10 @@ class MultiAttn(object):
             # Calculate attention distribution
             W = tf.get_variable('W', shape = [self.key_vec_size, self.value_vec_size], initializer=tf.contrib.layers.xavier_initializer()) # (key_vec_size, value_vec_size)
             W = tf.expand_dims(W, 0) # (1, key_vec_size, value_vec_size)
-            W = tf.tile(W, [values.shape[0], 1, 1]) # (batch_size, key_vec_size, value_vec_size)
+            W = tf.tile(W, [tf.shape(values)[0], 1, 1]) # (batch_size, key_vec_size, value_vec_size)
 
             values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            attn_logits = tf.matmul(tf.matmul(keys, W), values_t) / tf.sqrt(self.key_vec_size) # shape (batch_size, num_keys, num_values)
+            attn_logits = tf.matmul(tf.matmul(keys, W), values_t) / tf.sqrt(self.key_vec_size * 1.) # shape (batch_size, num_keys, num_values)
             attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
             _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
 
