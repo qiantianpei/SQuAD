@@ -318,7 +318,7 @@ class GatedAttn(object):
                 assert c_t.shape[1:] == [1, self.value_vec_size]
                 u_tP_c_t = tf.concat([keys[:,t:(t+1),:], c_t], 2) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
                 assert u_tP_c_t.shape[1:] == [1, self.value_vec_size + self.key_vec_size]
-                g_t = mat_weight_mul(u_tP_c_t, W_g) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
+                g_t = tf.sigmoid(mat_weight_mul(u_tP_c_t, W_g)) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
                 u_tP_c_t_star = tf.squeeze(u_tP_c_t * g_t, [1]) # (batch_size, self.value_vec_size + self.key_vec_size)
 
                 with tf.variable_scope("QP_match"):
@@ -377,25 +377,56 @@ class SelfAttn(object):
             (using the attention distribution as weights).
         """
         with vs.variable_scope("SelfAttn"):
-
+            star = []
             W_vP1 = tf.get_variable('W_vP1', shape = [self.vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             W_vP2 = tf.get_variable('W_VP2', shape = [self.vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+            W_g = tf.get_variable('W_g', shape = [self.vec_size * 2, self.vec_size * 2], initializer = tf.contrib.layers.xavier_initializer())
 
-            W_vP1_v_P = tf.expand_dims(mat_weight_mul(values, W_vP1), 1) # (batch_size, 1, context_len, hidden_size)
-            W_vP2_v_P = tf.expand_dims(mat_weight_mul(values, W_vP2), 2) # (batch_size, context_len, 1, hidden_size)
+            QP_match_cell = rnn_cell.GRUCell(self.hidden_size)
+            QP_match_cell = DropoutWrapper(QP_match_cell, input_keep_prob=self.keep_prob)
+            QP_match_state = QP_match_cell.zero_state(tf.shape(values)[0], tf.float32)
 
-            tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P) # (batch_size, context_len, context_len, hidden_size)
-            s = mat_weight_mul(tanh, v) # (batch_size, context_len, context_len, 1)
+            for t in range(values.shape[1]): # context_len
+                W_vP1_v_P = mat_weight_mul(values, W_vP1)
+                W_vP2_v_P =mat_weight_mul(values[:,t:(t+1),:], W_vP2)
 
-            _, a = masked_softmax(s, tf.expand_dims(values_mask, 1), 2) # shape (batch_size, context_len, context_len)
-            c = tf.matmul(a, values)
-            c = tf.nn.dropout(c, self.keep_prob)
-            v_P_c = tf.concat([values, c], 2) # (batch_size, context_len, context_size * 2)
+                tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P)
 
+                s_t = tf.squeeze(mat_weight_mul(tanh, v), [2]) # (batch_size, q_len)
+                _, a_t = masked_softmax(s_t, values_mask, 1) # (batch_size, q_len)
+                c_t = tf.matmul(tf.expand_dims(a_t, 1), values)
+                c_t = tf.nn.dropout(c_t, self.keep_prob)
+                u_tP_c_t = tf.concat([values[:,t:(t+1),:], c_t], 2) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
+                g_t = tf.sigmoid(mat_weight_mul(u_tP_c_t, W_g)) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
+                u_tP_c_t_star = tf.squeeze(u_tP_c_t * g_t, [1]) # (batch_size, self.value_vec_size + self.key_vec_size)
+
+                star.append(u_tP_c_t_star)
+
+            star = tf.stack(star, 1)
             encoder = RNNEncoder(self.hidden_size, self.keep_prob)
+            h_P = encoder.build_graph(star, values_mask) # (batch_size, context_len, hidden_size * 2)
+            #assert v_P.shape[1:] == [keys.shape[1], self.hidden_size]
+            #v_P = tf.nn.dropout(v_P, self.keep_prob)
 
-            h_P = encoder.build_graph(v_P_c, values_mask) # (batch_size, context_len, hidden_size * 2)
+            # W_vP1 = tf.get_variable('W_vP1', shape = [self.vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            # W_vP2 = tf.get_variable('W_VP2', shape = [self.vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            # v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+
+            # W_vP1_v_P = tf.expand_dims(mat_weight_mul(values, W_vP1), 1) # (batch_size, 1, context_len, hidden_size)
+            # W_vP2_v_P = tf.expand_dims(mat_weight_mul(values, W_vP2), 2) # (batch_size, context_len, 1, hidden_size)
+
+            # tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P) # (batch_size, context_len, context_len, hidden_size)
+            # s = mat_weight_mul(tanh, v) # (batch_size, context_len, context_len, 1)
+
+            # _, a = masked_softmax(s, tf.expand_dims(values_mask, 1), 2) # shape (batch_size, context_len, context_len)
+            # c = tf.matmul(a, values)
+            # c = tf.nn.dropout(c, self.keep_prob)
+            # v_P_c = tf.concat([values, c], 2) # (batch_size, context_len, context_size * 2)
+
+            # encoder = RNNEncoder(self.hidden_size, self.keep_prob)
+
+            # h_P = encoder.build_graph(v_P_c, values_mask) # (batch_size, context_len, hidden_size * 2)
                     
         return h_P
 
