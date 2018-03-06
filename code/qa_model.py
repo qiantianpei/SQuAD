@@ -180,34 +180,25 @@ class QAModel(object):
 
         with vs.variable_scope("QPEncoder"):
             encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            # encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            # encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
 
-            context_hiddens = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
-            question_hiddens = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+            context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
+            context_hiddens2 = encoder2.build_graph(context_hiddens1, self.context_mask)
+            context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
+
+            question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+            question_hiddens2 = encoder2.build_graph(question_hiddens1, self.qn_mask)
+            question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
 
         with vs.variable_scope("GatedAttn"):
-            attn_layer_gated = MultiAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            _, attn_output_gated = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size*2)
-            
-            gate_unact = tf.concat([attn_output_gated, context_hiddens], axis = 2) # (batch_size, context_len, hidden_size * 4)
-            assert gate_unact.shape[1:] == [self.FLAGS.context_len, self.FLAGS.hidden_size * 4]
-            gate = tf.contrib.layers.fully_connected(gate_unact, num_outputs = self.FLAGS.hidden_size * 4, activation_fn=tf.nn.sigmoid)
+            attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
+            context_hiddens_gated = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
 
-            encoder_gated = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob) 
-            context_hiddens_gated = encoder_gated.build_graph(gate * gate_unact, self.qn_mask) # (batch_size, context_len, hidden_size*2)
-        
 
         with vs.variable_scope("SelfAttn"): 
-            attn_layer_self = MultiAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            _, attn_output_self = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask, context_hiddens_gated)
-
-            gate2_unact = tf.concat([attn_output_self, context_hiddens_gated], axis = 2) # (batch_size, context_len, hidden_size * 4)
-            assert gate_unact.shape[1:] == [self.FLAGS.context_len, self.FLAGS.hidden_size * 4]
-            gate2 = tf.contrib.layers.fully_connected(gate2_unact, num_outputs = self.FLAGS.hidden_size * 4, activation_fn=tf.nn.sigmoid)
-
-            encoder_self = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob) 
-            context_hiddens_self = encoder_self.build_graph(gate2 * gate2_unact, self.context_mask) # (batch_size, context_len, hidden_size*2)
+            attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
+            attn_output_self = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
 
         # # Use context hidden states to attend to question hidden states
         # attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)

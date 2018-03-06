@@ -219,7 +219,7 @@ class MultiAttn(object):
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
-        with vs.variable_scope("BasicAttn", reuse = None):
+        with vs.variable_scope("MultiAttn", reuse = None):
 
             # Calculate attention distribution
             W = tf.get_variable('W', shape = [self.key_vec_size, self.value_vec_size], initializer=tf.contrib.layers.xavier_initializer()) # (key_vec_size, value_vec_size)
@@ -238,6 +238,165 @@ class MultiAttn(object):
             output = tf.nn.dropout(output, self.keep_prob)
 
             return attn_dist, output
+
+
+class GatedAttn(object):
+    """Module for basic attention.
+
+    Note: in this module we use the terminology of "keys" and "values" (see lectures).
+    In the terminology of "X attends to Y", "keys attend to values".
+
+    In the baseline model, the keys are the context hidden states
+    and the values are the question hidden states.
+
+    We choose to use general terminology of keys and values in this module
+    (rather than context and question) to avoid confusion if you reuse this
+    module with other inputs.
+    """
+
+    def __init__(self, keep_prob, key_vec_size, value_vec_size, hidden_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          key_vec_size: size of the key vectors. int
+          value_vec_size: size of the value vectors. int
+        """
+        self.keep_prob = keep_prob
+        self.key_vec_size = key_vec_size
+        self.value_vec_size = value_vec_size
+        self.hidden_size = hidden_size
+
+    def build_graph(self, values, values_mask, keys):
+        """
+        Keys attend to values.
+        For each key, return an attention distribution and an attention output vector.
+
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          keys: Tensor shape (batch_size, num_keys, value_vec_size)
+
+        Outputs:
+          attn_dist: Tensor shape (batch_size, num_keys, num_values).
+            For each key, the distribution should sum to 1,
+            and should be 0 in the value locations that correspond to padding.
+          output: Tensor shape (batch_size, num_keys, hidden_size).
+            This is the attention output; the weighted sum of the values
+            (using the attention distribution as weights).
+        """
+        with vs.variable_scope("GatedAttn"):
+
+            v_P = []
+            W_uQ = tf.get_variable('W_uQ', shape = [self.value_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            W_uP = tf.get_variable('W_uP', shape = [self.key_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            W_vP = tf.get_variable('W_vP', shape = [self.key_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+            W_g = tf.get_variable('W_g', shape = [self.key_vec_size + self.value_vec_size, self.key_vec_size + self.value_vec_size], initializer = tf.contrib.layers.xavier_initializer())
+
+            QP_match_cell = rnn_cell.GRUCell(self.hidden_size)
+            QP_match_cell = DropoutWrapper(QP_match_cell, input_keep_prob=self.keep_prob)
+            QP_match_state = QP_match_cell.zero_state(tf.shape(values)[0], tf.float32)
+
+            for t in range(self.key_vec_size):
+                W_uQ_u_Q = tf.tensordot(values, W_uQ, 1) # (batch_size, q_len, hidden_size)
+                W_uP_u_tP = tf.tensordot(keys[:,t:(t+1),:], W_uP, 1) # (batch_size, 1, hidden_size)
+
+                if t == 0:
+                    tanh = tf.tanh(W_uQ_u_Q + W_uP_u_tP)
+                else:
+                    W_vP_v_t1P = tf.tensordot(tf.expand_dims(v_P[t-1], 1), W_uP, 1)
+                    tanh = tf.tanh(W_uQ_u_Q + W_uP_u_tP + W_vP_v_t1P)
+
+                s_t = tf.squeeze(tf.tensordot(tanh, v, 1)) # (batch_size, q_len)
+                _, a_t = masked_softmax(s_t, values_mask, 1)
+                c_t = tf.tensordot(tf.expand_dims(a_t, 1), values, 1)
+                c_t = tf.nn.dropout(c_t, self.keep_prob)
+                assert c_t.shape[1:] == [1, self.value_vec_size]
+                u_tP_c_t = tf.concat([keys[:,t:(t+1),:], c_t], 2) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
+                g_t = tf.tensordot(u_tP_c_t, W_g, 1) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
+                u_tP_c_t_star = tf.squeeze(u_tP_c_t * g_t) # (batch_size, self.value_vec_size + self.key_vec_size)
+
+                with tf.variable_scope("QP_match"):
+                    if t > 0:
+                        tf.get_variable_scope().reuse_variables()
+                    output, QPmatch_state = QP_match_cell(u_tP_c_t_star, QP_match_state)
+                    v_P.append(output) # output: (batch_size, hidden_size)
+            v_P = tf.stack(v_P, 1)
+            #v_P = tf.nn.dropout(v_P, self.keep_prob)
+                    
+        return v_P
+
+class SelfAttn(object):
+    """Module for basic attention.
+
+    Note: in this module we use the terminology of "keys" and "values" (see lectures).
+    In the terminology of "X attends to Y", "keys attend to values".
+
+    In the baseline model, the keys are the context hidden states
+    and the values are the question hidden states.
+
+    We choose to use general terminology of keys and values in this module
+    (rather than context and question) to avoid confusion if you reuse this
+    module with other inputs.
+    """
+
+    def __init__(self, keep_prob, vec_size, hidden_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          key_vec_size: size of the key vectors. int
+          value_vec_size: size of the value vectors. int
+        """
+        self.keep_prob = keep_prob
+        self.vec_size = key_vec_size
+        self.hidden_size = hidden_size
+
+    def build_graph(self, values, values_mask):
+        """
+        Keys attend to values.
+        For each key, return an attention distribution and an attention output vector.
+
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          keys: Tensor shape (batch_size, num_keys, value_vec_size)
+
+        Outputs:
+          attn_dist: Tensor shape (batch_size, num_keys, num_values).
+            For each key, the distribution should sum to 1,
+            and should be 0 in the value locations that correspond to padding.
+          output: Tensor shape (batch_size, num_keys, hidden_size).
+            This is the attention output; the weighted sum of the values
+            (using the attention distribution as weights).
+        """
+        with vs.variable_scope("SelfAttn"):
+
+            W_vP1 = tf.get_variable('W_vP1', shape = [self.value_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            W_vP2 = tf.get_variable('W_VP2', shape = [self.key_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+
+            self_match_cell = rnn_cell.GRUCell(self.hidden_size)
+            self_match_cell = DropoutWrapper(QP_match_cell, input_keep_prob=self.keep_prob)
+            QPmatch_state_state = QP_match_cell.zero_state(tf.shape(values)[0], tf.float32)
+
+            W_vP1_v_P = tf.expand_dims(tf.tensordot(values, W_vP1, 1), 1) # (batch_size, 1, context_len, hidden_size)
+            W_vP2_v_P = tf.expand_dims(tf.tensordot(values, W_vP2, 1), 2) # (batch_size, context_len, 1, hidden_size)
+
+            tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P) # (batch_size, context_len, context_len, hidden_size)
+            s = tf.tensordot(tanh, v, 1) # (batch_size, context_len, context_len, 1)
+
+            _, a = masked_softmax(s_t, tf.expand_dims(values_mask, 1), 2) # shape (batch_size, context_len, context_len)
+            c = tf.matmul(a, values)
+            c = tf.nn.dropout(c, self.keep_prob)
+            u_P_c = tf.concat([values, c], 2) # (batch_size, context_len, hidden_size * 2)
+
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+
+            h_P = encoder.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size * 2)
+                    
+        return H_P
 
 
 def masked_softmax(logits, mask, dim):
