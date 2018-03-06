@@ -290,7 +290,7 @@ class GatedAttn(object):
             v_P = []
             W_uQ = tf.get_variable('W_uQ', shape = [self.value_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             W_uP = tf.get_variable('W_uP', shape = [self.key_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
-            W_vP = tf.get_variable('W_vP', shape = [self.key_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            W_vP = tf.get_variable('W_vP', shape = [self.hidden_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
             W_g = tf.get_variable('W_g', shape = [self.key_vec_size + self.value_vec_size, self.key_vec_size + self.value_vec_size], initializer = tf.contrib.layers.xavier_initializer())
 
@@ -298,26 +298,28 @@ class GatedAttn(object):
             QP_match_cell = DropoutWrapper(QP_match_cell, input_keep_prob=self.keep_prob)
             QP_match_state = QP_match_cell.zero_state(tf.shape(values)[0], tf.float32)
 
-            for t in range(tf.shape(self.key)[1]): # context_len
-                W_uQ_u_Q = tf.tensordot(values, W_uQ, 1) # (batch_size, q_len, hidden_size)
-                W_uP_u_tP = tf.tensordot(keys[:,t:(t+1),:], W_uP, 1) # (batch_size, 1, hidden_size)
+            for t in range(keys.shape[1]): # context_len
+                W_uQ_u_Q = mat_weight_mul(values, W_uQ) # (batch_size, q_len, hidden_size)
+                W_uP_u_tP = mat_weight_mul(keys[:,t:(t+1),:], W_uP) # (batch_size, 1, hidden_size)
 
                 if t == 0:
                     tanh = tf.tanh(W_uQ_u_Q + W_uP_u_tP)
                 else:
-                    W_vP_v_t1P = tf.tensordot(tf.expand_dims(v_P[t-1], 1), W_uP, 1)
+                    W_vP_v_t1P = mat_weight_mul(tf.expand_dims(v_P[t-1], 1), W_vP)
                     tanh = tf.tanh(W_uQ_u_Q + W_uP_u_tP + W_vP_v_t1P)
-                assert tanh.shape[1:] == [tf.shape(self.values)[1], self.hidden_siz]
+                assert tanh.shape[1:] == [values.shape[1], self.hidden_size]
 
-                s_t = tf.squeeze(tf.tensordot(tanh, v, 1)) # (batch_size, q_len)
+
+
+                s_t = tf.squeeze(mat_weight_mul(tanh, v), [2]) # (batch_size, q_len)
                 _, a_t = masked_softmax(s_t, values_mask, 1) # (batch_size, q_len)
-                c_t = tf.tensordot(tf.expand_dims(a_t, 1), values, 1)
+                c_t = tf.matmul(tf.expand_dims(a_t, 1), values)
                 c_t = tf.nn.dropout(c_t, self.keep_prob)
                 assert c_t.shape[1:] == [1, self.value_vec_size]
                 u_tP_c_t = tf.concat([keys[:,t:(t+1),:], c_t], 2) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
                 assert u_tP_c_t.shape[1:] == [1, self.value_vec_size + self.key_vec_size]
-                g_t = tf.tensordot(u_tP_c_t, W_g, 1) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
-                u_tP_c_t_star = tf.squeeze(u_tP_c_t * g_t) # (batch_size, self.value_vec_size + self.key_vec_size)
+                g_t = mat_weight_mul(u_tP_c_t, W_g) # (batch_size, 1, self.value_vec_size + self.key_vec_size)
+                u_tP_c_t_star = tf.squeeze(u_tP_c_t * g_t, [1]) # (batch_size, self.value_vec_size + self.key_vec_size)
 
                 with tf.variable_scope("QP_match"):
                     if t > 0:
@@ -325,7 +327,7 @@ class GatedAttn(object):
                     output, QPmatch_state = QP_match_cell(u_tP_c_t_star, QP_match_state)
                     v_P.append(output) # output: (batch_size, hidden_size)
             v_P = tf.stack(v_P, 1)
-            assert v_P.shape[1:] = [tf.shape(self.key)[1], self.hidden_size]
+            #assert v_P.shape[1:] == [keys.shape[1], self.hidden_size]
             #v_P = tf.nn.dropout(v_P, self.keep_prob)
                     
         return v_P
@@ -380,18 +382,18 @@ class SelfAttn(object):
             W_vP2 = tf.get_variable('W_VP2', shape = [self.vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
 
-            W_vP1_v_P = tf.expand_dims(tf.tensordot(values, W_vP1, 1), 1) # (batch_size, 1, context_len, hidden_size)
-            W_vP2_v_P = tf.expand_dims(tf.tensordot(values, W_vP2, 1), 2) # (batch_size, context_len, 1, hidden_size)
+            W_vP1_v_P = tf.expand_dims(mat_weight_mul(values, W_vP1), 1) # (batch_size, 1, context_len, hidden_size)
+            W_vP2_v_P = tf.expand_dims(mat_weight_mul(values, W_vP2), 2) # (batch_size, context_len, 1, hidden_size)
 
             tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P) # (batch_size, context_len, context_len, hidden_size)
-            s = tf.tensordot(tanh, v, 1) # (batch_size, context_len, context_len, 1)
+            s = mat_weight_mul(tanh, v) # (batch_size, context_len, context_len, 1)
 
             _, a = masked_softmax(s, tf.expand_dims(values_mask, 1), 2) # shape (batch_size, context_len, context_len)
             c = tf.matmul(a, values)
             c = tf.nn.dropout(c, self.keep_prob)
             v_P_c = tf.concat([values, c], 2) # (batch_size, context_len, context_size * 2)
 
-            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            encoder = RNNEncoder(self.hidden_size, self.keep_prob)
 
             h_P = encoder.build_graph(v_P_c, values_mask) # (batch_size, context_len, hidden_size * 2)
                     
@@ -412,7 +414,7 @@ class PntNet(object):
     module with other inputs.
     """
 
-    def __init__(self, keep_prob, context_size, quesiton_size, hidden_size):
+    def __init__(self, keep_prob, context_size, question_size, hidden_size):
         """
         Inputs:
           keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
@@ -452,34 +454,43 @@ class PntNet(object):
             v1 = tf.get_variable('v1', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
             v2 = tf.get_variable('v2', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
 
-            ptr_cell = rnn_cell.GRUCell(self.hidden_size)
+            ptr_cell = rnn_cell.GRUCell(self.question_size)
             ptr_cell = DropoutWrapper(ptr_cell, input_keep_prob=self.keep_prob)
 
-            W_uQ_u_Q = tf.tensordot(values, W_uQ, 1) # (batch_size, q_len, hidden_size)
+            W_uQ_u_Q = mat_weight_mul(question, W_uQ) # (batch_size, q_len, hidden_size)
             tanh1 = tf.tanh(W_uQ_u_Q + W_vQ_V_rQ) # (batch_size, q_len, hidden_size)
-            s1 = tf.squeeze(tf.tensordot(tanh1, v1, 1)) # (batch_size, q_len)
+            s1 = tf.squeeze(mat_weight_mul(tanh1, v1), [2]) # (batch_size, q_len)
             _, a = masked_softmax(s1, question_mask, 1)
-            r1 = tf.tensordot(tf.expand_dims(a_t, 1), question, 1)
+            r1 = tf.matmul(tf.expand_dims(a, 1), question)
             r1 = tf.nn.dropout(r1, self.keep_prob) # (batch_size, 1, question_size)
 
-            W_ha_r1 = tf.tensordot(r1, W_ha, 1) # (batch_size, 1, hidden_size)
-            W_hP_h_P1 = tf.tensordot(context, W_hP, 1) # (batch_size, c_len, hidden_size)
+            W_ha_r1 = mat_weight_mul(r1, W_ha) # (batch_size, 1, hidden_size)
+            W_hP_h_P1 = mat_weight_mul(context, W_hP) # (batch_size, c_len, hidden_size)
 
             tanh2 = tf.tanh(W_ha_r1 + W_hP_h_P1) # (batch_size, c_len, hidden_size)
-            s2 = tf.squeeze(tf.tensordot(tanh2, v2, 1)) # (batch_size, c_len)
+            s2 = tf.squeeze(mat_weight_mul(tanh2, v2), [2]) # (batch_size, c_len)
             logits_start, probdist_start = masked_softmax(s2, context_mask, 1)
-            c = tf.squeeze(tf.tensordot(tf.expand_dims(probdist_start, 1), context, 1)) # (batch_size, context_size)
-            r2, _ = ptr_cell(c, tf.squeeze(r1))
+            c = tf.squeeze(tf.matmul(tf.expand_dims(probdist_start, 1), context), [1]) # (batch_size, context_size)
+            r2, _ = ptr_cell(c, tf.squeeze(r1, [1]))
+            r2 = tf.expand_dims(r2, 1)
 
-            W_ha_r2 = tf.tensordot(r2, W_ha, 1) # (batch_size, 1, hidden_size)
-            W_hP_h_P2 = tf.tensordot(context, W_hP, 1) # (batch_size, c_len, hidden_size)
+            W_ha_r2 = mat_weight_mul(r2, W_ha) # (batch_size, 1, hidden_size)
+            W_hP_h_P2 = mat_weight_mul(context, W_hP) # (batch_size, c_len, hidden_size)
 
             tanh3 = tf.tanh(W_ha_r2 + W_hP_h_P2) # (batch_size, c_len, hidden_size)
-            s3 = tf.squeeze(tf.tensordot(tanh3, v2, 1)) # (batch_size, c_len)
+            s3 = tf.squeeze(mat_weight_mul(tanh3, v2), [2]) # (batch_size, c_len)
             logits_end, probdist_end = masked_softmax(s3, context_mask, 1) 
                     
         return logits_start, probdist_start, logits_end, probdist_end
 
+def mat_weight_mul(mat, weight):
+        # [batch_size, n, m] * [m, p] = [batch_size, n, p]
+        mat_shape = mat.get_shape().as_list()
+        weight_shape = weight.get_shape().as_list()
+        assert(mat_shape[-1] == weight_shape[0])
+        mat_reshape = tf.reshape(mat, [-1, mat_shape[-1]]) # [batch_size * n, m]
+        mul = tf.matmul(mat_reshape, weight) # [batch_size * n, p]
+        return tf.reshape(mul, [-1, mat_shape[1], weight_shape[-1]])
 
 def masked_softmax(logits, mask, dim):
     """

@@ -179,32 +179,33 @@ class QAModel(object):
             qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         #####
 
-        with vs.variable_scope("QPEncoder"):
+        with vs.variable_scope("QPEncoder1"):
             encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-
             context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
-            context_hiddens2 = encoder2.build_graph(context_hiddens1, self.context_mask)
-            context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
-
             question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+            
+        with vs.variable_scope("QPEncoder2"):
+            encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            context_hiddens2 = encoder2.build_graph(context_hiddens1, self.context_mask)
             question_hiddens2 = encoder2.build_graph(question_hiddens1, self.qn_mask)
-            question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
 
+        with vs.variable_scope("QPEncoder3"):
+            encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
+            question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
         with vs.variable_scope("GatedAttn"):
             attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
             context_hiddens_gated = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
 
 
         with vs.variable_scope("SelfAttn"): 
-            attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
+            attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size)
             attn_output_self = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
 
         
         with vs.variable_scope("Output"): 
             output_layer = PntNet(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
-            self.logits_start, self.probdist_start, self.logits_end, self.probdist_end = output_layer.build(attn_output_self, question_hiddens, self.context_mask, self.question_mask)
+            self.logits_start, self.probdist_start, self.logits_end, self.probdist_end = output_layer.build_graph(attn_output_self, question_hiddens, self.context_mask, self.qn_mask)
         # # Use context hidden states to attend to question hidden states
         # attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         # _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
