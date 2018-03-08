@@ -73,15 +73,15 @@ class QAModel(object):
         clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
         self.param_norm = tf.global_norm(params)
 
-        # # Define optimizer and updates
-        # # (updates is what you need to fetch in session.run to do a gradient update)
+        # Define optimizer and updates
+        # (updates is what you need to fetch in session.run to do a gradient update)
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        # opt = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06)
-        # #opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
-        # self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+        opt = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06)
+        #opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
+        self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
         
         print "done loss"
-        self.updates = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06).minimize(self.loss)
+        #self.updates = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06).minimize(self.loss)
         # Define savers (for checkpointing) and summaries (for tensorboard)
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.keep)
         self.bestmodel_saver = tf.train.Saver(tf.global_variables(), max_to_keep=1)
@@ -399,14 +399,14 @@ class QAModel(object):
         start_dist, end_dist = self.get_prob_dists(session, batch)
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
-        start_pos = np.argmax(start_dist, axis=1)
-        end_pos = np.argmax(end_dist, axis=1)
+        #start_pos = np.argmax(start_dist, axis=1)
+        #end_pos = np.argmax(end_dist, axis=1)
 
         prob = []
         span = 20
         for i in range(self.FLAGS.context_len - span):
             for j in range(span):
-                prob.append(start_pos[:, i] * end_pos[:, i+j])
+                prob.append(start_dist[:, i] * end_dist[:, i+j])
         prob = np.stack(prob, axis = 1)
         argmax_idx = np.argmax(prob, axis=1)
         start_pos = argmax_idx / span
@@ -550,11 +550,11 @@ class QAModel(object):
 
         # Print number of model parameters
         print "train start"
-        # tic = time.time()
-        # params = tf.trainable_variables()
-        # num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
-        # toc = time.time()
-        # logging.info("Number of params: %d (retrieval took %f secs)" % (num_params, toc - tic))
+        tic = time.time()
+        params = tf.trainable_variables()
+        num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+        toc = time.time()
+        logging.info("Number of params: %d (retrieval took %f secs)" % (num_params, toc - tic))
 
         # We will keep track of exponentially-smoothed loss
         exp_loss = None
