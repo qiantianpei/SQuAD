@@ -409,7 +409,7 @@ class QAModel(object):
                 prob.append(start_dist[:, i] * end_dist[:, i+j])
         prob = np.stack(prob, axis = 1)
         argmax_idx = np.argmax(prob, axis=1)
-        start_pos = argmax_idx / span
+        start_pos = argmax_idx // span
         end_pos = start_pos + np.mod(argmax_idx, span)
         # pred_si = argmax_idx / opts['span_length']
         # pred_ei = pred_si + tf.cast(tf.mod(argmax_idx , opts['span_length']), tf.float64)
