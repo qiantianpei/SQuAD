@@ -66,12 +66,12 @@ class QAModel(object):
             print "add loss"
             self.add_loss()
 
-        # # Define trainable parameters, gradient, gradient norm, and clip by gradient norm
-        # params = tf.trainable_variables()
-        # gradients = tf.gradients(self.loss, params)
-        # self.gradient_norm = tf.global_norm(gradients)
-        # clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
-        # self.param_norm = tf.global_norm(params)
+        # Define trainable parameters, gradient, gradient norm, and clip by gradient norm
+        params = tf.trainable_variables()
+        gradients = tf.gradients(self.loss, params)
+        self.gradient_norm = tf.global_norm(gradients)
+        clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
+        self.param_norm = tf.global_norm(params)
 
         # # Define optimizer and updates
         # # (updates is what you need to fetch in session.run to do a gradient update)
