@@ -75,16 +75,18 @@ class QAModel(object):
 
         # # Define optimizer and updates
         # # (updates is what you need to fetch in session.run to do a gradient update)
-        # self.global_step = tf.Variable(0, name="global_step", trainable=False)
+        self.global_step = tf.Variable(0, name="global_step", trainable=False)
         # opt = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06)
         # #opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
         # self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
         
+        print "done loss"
         self.updates = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06).minimize(self.loss)
         # Define savers (for checkpointing) and summaries (for tensorboard)
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.keep)
         self.bestmodel_saver = tf.train.Saver(tf.global_variables(), max_to_keep=1)
         self.summaries = tf.summary.merge_all()
+        print "done init"
 
 
     def add_placeholders(self):
@@ -184,33 +186,37 @@ class QAModel(object):
         #     qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         # #####
 
+        print "QPEncoder1"
         with vs.variable_scope("QPEncoder1"):
             encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             context_hiddens1 = encoder1.build_graph(self.context_embs, self.context_mask)
             #context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
             question_hiddens1 = encoder1.build_graph(self.qn_embs, self.qn_mask)
             #question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
-            
+        
+        print "QPEncoder2"
         with vs.variable_scope("QPEncoder2"):
             encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             context_hiddens2 = encoder2.build_graph(context_hiddens1, self.context_mask)
             question_hiddens2 = encoder2.build_graph(question_hiddens1, self.qn_mask)
 
+        print "QPEncoder3"
         with vs.variable_scope("QPEncoder3"):
             encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
             question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
         
+        print "GatedAttn"
         with vs.variable_scope("GatedAttn"):
             attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
             context_hiddens_gated = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
 
-
+        print "SelfAttn"
         with vs.variable_scope("SelfAttn"): 
             attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size)
             attn_output_self = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
 
-        
+        print "Output"
         with vs.variable_scope("Output"): 
             output_layer = PntNet(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
             self.logits_start, self.probdist_start, self.logits_end, self.probdist_end = output_layer.build_graph(attn_output_self, question_hiddens, self.context_mask, self.qn_mask)
@@ -543,11 +549,12 @@ class QAModel(object):
         """
 
         # Print number of model parameters
-        tic = time.time()
-        params = tf.trainable_variables()
-        num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
-        toc = time.time()
-        logging.info("Number of params: %d (retrieval took %f secs)" % (num_params, toc - tic))
+        print "train start"
+        # tic = time.time()
+        # params = tf.trainable_variables()
+        # num_params = sum(map(lambda t: np.prod(tf.shape(t.value()).eval()), params))
+        # toc = time.time()
+        # logging.info("Number of params: %d (retrieval took %f secs)" % (num_params, toc - tic))
 
         # We will keep track of exponentially-smoothed loss
         exp_loss = None
