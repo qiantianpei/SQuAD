@@ -291,15 +291,15 @@ class GatedAttn(object):
             W_uQ = tf.get_variable('W_uQ', shape = [self.value_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             W_uP = tf.get_variable('W_uP', shape = [self.key_vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             W_vP = tf.get_variable('W_vP', shape = [self.hidden_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
-            v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+            v = tf.get_variable('v', initializer = tf.truncated_normal([self.hidden_size, 1]))
             W_g = tf.get_variable('W_g', shape = [self.key_vec_size + self.value_vec_size, self.key_vec_size + self.value_vec_size], initializer = tf.contrib.layers.xavier_initializer())
 
             QP_match_cell = rnn_cell.GRUCell(self.hidden_size)
             QP_match_cell = DropoutWrapper(QP_match_cell, input_keep_prob=self.keep_prob)
             QP_match_state = QP_match_cell.zero_state(tf.shape(values)[0], tf.float32)
 
+            W_uQ_u_Q = tf.tensordot(values, W_uQ, 1) # (batch_size, q_len, hidden_size)
             for t in range(keys.shape[1]): # context_len
-                W_uQ_u_Q = tf.tensordot(values, W_uQ, 1) # (batch_size, q_len, hidden_size)
                 W_uP_u_tP = tf.tensordot(keys[:,t:(t+1),:], W_uP, 1) # (batch_size, 1, hidden_size)
 
                 if t == 0:
@@ -308,8 +308,6 @@ class GatedAttn(object):
                     W_vP_v_t1P = tf.tensordot(tf.expand_dims(v_P[t-1], 1), W_vP, 1)
                     tanh = tf.tanh(W_uQ_u_Q + W_uP_u_tP + W_vP_v_t1P)
                 assert tanh.shape[1:] == [values.shape[1], self.hidden_size]
-
-
 
                 s_t = tf.squeeze(tf.tensordot(tanh, v, 1), [2]) # (batch_size, q_len)
                 _, a_t = masked_softmax(s_t, values_mask, 1) # (batch_size, q_len)
@@ -380,15 +378,15 @@ class SelfAttn(object):
             star = []
             W_vP1 = tf.get_variable('W_vP1', shape = [self.vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             W_vP2 = tf.get_variable('W_VP2', shape = [self.vec_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
-            v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+            v = tf.get_variable('v', initializer = tf.truncated_normal([self.hidden_size, 1]))
             W_g = tf.get_variable('W_g', shape = [self.vec_size * 2, self.vec_size * 2], initializer = tf.contrib.layers.xavier_initializer())
 
             QP_match_cell = rnn_cell.GRUCell(self.hidden_size)
             QP_match_cell = DropoutWrapper(QP_match_cell, input_keep_prob=self.keep_prob)
             QP_match_state = QP_match_cell.zero_state(tf.shape(values)[0], tf.float32)
 
+            W_vP1_v_P = tf.tensordot(values, W_vP1, 1)
             for t in range(values.shape[1]): # context_len
-                W_vP1_v_P = tf.tensordot(values, W_vP1, 1)
                 W_vP2_v_P =tf.tensordot(values[:,t:(t+1),:], W_vP2, 1)
 
                 tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P)
@@ -480,16 +478,20 @@ class PntNet(object):
 
             W_hP = tf.get_variable('W_hP', shape = [self.context_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             W_ha = tf.get_variable('W_ha', shape = [self.question_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
-            W_uQ = tf.get_variable('W_vP', shape = [self.question_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
-            W_vQ_V_rQ = tf.get_variable('W_vQ_V_rQ', shape = [1, 1, self.hidden_size],  initializer = tf.contrib.layers.xavier_initializer())
-            v1 = tf.get_variable('v1', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
-            v2 = tf.get_variable('v2', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+            
+            W_uQ = tf.get_variable('W_vP', shape = [self.question_size, 2 * self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            W_VrQ = tf.get_variable('W_VrQ', shape = [question.shape[1], self.hidden_size],  initializer = tf.contrib.layers.xavier_initializer())
+            W_vQ = tf.get_variable('W_vQ', shape = [self.hidden_size, 2 * self.hidden_size],  initializer = tf.contrib.layers.xavier_initializer())
 
-            ptr_cell = rnn_cell.GRUCell(self.question_size)
+            v1 = tf.get_variable('v1', initializer = tf.truncated_normal([2 * self.hidden_size, 1]))
+            v2 = tf.get_variable('v2', initializer = tf.truncated_normal([self.hidden_size, 1]))
+
+            ptr_cell = rnn_cell.GRUCell(self.context_size)
             ptr_cell = DropoutWrapper(ptr_cell, input_keep_prob=self.keep_prob)
 
-            W_uQ_u_Q = tf.tensordot(question, W_uQ, 1) # (batch_size, q_len, hidden_size)
-            tanh1 = tf.tanh(W_uQ_u_Q + W_vQ_V_rQ) # (batch_size, q_len, hidden_size)
+            W_uQ_u_Q = tf.tensordot(question, W_uQ, 1) # (batch_size, q_len, hidden_size * 2)
+            W_vQ_V_rQ = tf.expand_dims(tf.matmul(W_VrQ, W_vQ), 0) # (1, q_len, hidden_size * 2)
+            tanh1 = tf.tanh(W_uQ_u_Q + W_vQ_V_rQ) # (batch_size, q_len, hidden_size * 2)
             s1 = tf.squeeze(tf.tensordot(tanh1, v1, 1), [2]) # (batch_size, q_len)
             _, a = masked_softmax(s1, question_mask, 1)
             r1 = tf.matmul(tf.expand_dims(a, 1), question)
@@ -502,6 +504,9 @@ class PntNet(object):
             s2 = tf.squeeze(tf.tensordot(tanh2, v2, 1), [2]) # (batch_size, c_len)
             logits_start, probdist_start = masked_softmax(s2, context_mask, 1)
             c = tf.squeeze(tf.matmul(tf.expand_dims(probdist_start, 1), context), [1]) # (batch_size, context_size)
+
+
+            initial_state = ptr_cell.zero_state(tf.shape(context)[0], dtype=tf.float32)
             r2, _ = ptr_cell(c, tf.squeeze(r1, [1]))
             r2 = tf.expand_dims(r2, 1)
 

@@ -57,25 +57,30 @@ class QAModel(object):
 
         # Add all parts of the graph
         with tf.variable_scope("QAModel", initializer=tf.contrib.layers.variance_scaling_initializer(factor=1.0, uniform=True)):
+            print "add placeholder"
             self.add_placeholders()
+            print "add embbding"
             self.add_embedding_layer(emb_matrix)
+            print "Build graph"
             self.build_graph()
+            print "add loss"
             self.add_loss()
 
-        # Define trainable parameters, gradient, gradient norm, and clip by gradient norm
-        params = tf.trainable_variables()
-        gradients = tf.gradients(self.loss, params)
-        self.gradient_norm = tf.global_norm(gradients)
-        clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
-        self.param_norm = tf.global_norm(params)
+        # # Define trainable parameters, gradient, gradient norm, and clip by gradient norm
+        # params = tf.trainable_variables()
+        # gradients = tf.gradients(self.loss, params)
+        # self.gradient_norm = tf.global_norm(gradients)
+        # clipped_gradients, _ = tf.clip_by_global_norm(gradients, FLAGS.max_gradient_norm)
+        # self.param_norm = tf.global_norm(params)
 
-        # Define optimizer and updates
-        # (updates is what you need to fetch in session.run to do a gradient update)
-        self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        opt = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06)
-        #opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
-        self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
-
+        # # Define optimizer and updates
+        # # (updates is what you need to fetch in session.run to do a gradient update)
+        # self.global_step = tf.Variable(0, name="global_step", trainable=False)
+        # opt = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06)
+        # #opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
+        # self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
+        
+        self.updates = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06).minimize(self.loss)
         # Define savers (for checkpointing) and summaries (for tensorboard)
         self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=FLAGS.keep)
         self.bestmodel_saver = tf.train.Saver(tf.global_variables(), max_to_keep=1)
@@ -148,41 +153,43 @@ class QAModel(object):
         # between the context and the question.
 
 
-        ##### my change: character-level CNN
-        with vs.variable_scope("CharCNN"):
-            context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * context_len, word_len, embedding_size)
-            context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
+        # ##### my change: character-level CNN
+        # with vs.variable_scope("CharCNN"):
+        #     context_embs_c_raw = tf.reshape(self.context_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * context_len, word_len, embedding_size)
+        #     context_embs_c_raw = tf.nn.dropout(context_embs_c_raw, self.keep_prob)
             
-            context_embs_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = None) # shape (batch_size * context_len, word_len, filters)
-            #assert context_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
+        #     context_embs_c_conv = tf.layers.conv1d(inputs = context_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = None) # shape (batch_size * context_len, word_len, filters)
+        #     #assert context_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, self.FLAGS.word_len, self.FLAGS.filters]
             
-            context_embs_c_pool = tf.layers.max_pooling1d(inputs = context_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
-            #assert context_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
+        #     context_embs_c_pool = tf.layers.max_pooling1d(inputs = context_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * context_len, 1, filters)
+        #     #assert context_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.context_len, 1, self.FLAGS.filters]
             
-            context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
-            #assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
+        #     context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
+        #     #assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
 
-            #tf.get_variable_scope().reuse_variables()
-            qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
-            qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
+        #     #tf.get_variable_scope().reuse_variables()
+        #     qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
+        #     qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
             
-            qn_embs_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = True) # shape (batch_size * question_len, word_len, filters)
-            #assert qn_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
+        #     qn_embs_c_conv = tf.layers.conv1d(inputs = qn_embs_c_raw, filters = self.FLAGS.filters, kernel_size = self.FLAGS.kernel_size, padding = 'same', name = 'char_conv', reuse = True) # shape (batch_size * question_len, word_len, filters)
+        #     #assert qn_embs_c_conv.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, self.FLAGS.word_len, self.FLAGS.filters]
             
-            qn_embs_c_pool = tf.layers.max_pooling1d(inputs = qn_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
-            #assert qn_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
+        #     qn_embs_c_pool = tf.layers.max_pooling1d(inputs = qn_embs_c_conv, pool_size = self.FLAGS.word_len, strides = self.FLAGS.word_len) # shape (batch_size * question_len, 1, filters)
+        #     #assert qn_embs_c_pool.shape == [self.FLAGS.batch_size * self.FLAGS.question_len, 1, self.FLAGS.filters]
 
-            qn_embs_c = tf.reshape(qn_embs_c_pool, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
-            #assert qn_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.filters]
+        #     qn_embs_c = tf.reshape(qn_embs_c_pool, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
+        #     #assert qn_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.filters]
 
-            context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
-            qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
-        #####
+        #     context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
+        #     qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
+        # #####
 
         with vs.variable_scope("QPEncoder1"):
             encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
-            question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+            context_hiddens1 = encoder1.build_graph(self.context_embs, self.context_mask)
+            #context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
+            question_hiddens1 = encoder1.build_graph(self.qn_embs, self.qn_mask)
+            #question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
             
         with vs.variable_scope("QPEncoder2"):
             encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
@@ -193,6 +200,7 @@ class QAModel(object):
             encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
             question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
+        
         with vs.variable_scope("GatedAttn"):
             attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
             context_hiddens_gated = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
@@ -387,6 +395,18 @@ class QAModel(object):
         # Take argmax to get start_pos and end_post, both shape (batch_size)
         start_pos = np.argmax(start_dist, axis=1)
         end_pos = np.argmax(end_dist, axis=1)
+
+        prob = []
+        span = 20
+        for i in range(self.FLAGS.context_len - span):
+            for j in range(span):
+                prob.append(start_pos[:, i] * end_pos[:, i+j])
+        prob = np.stack(prob, axis = 1)
+        argmax_idx = np.argmax(prob, axis=1)
+        start_pos = argmax_idx / span
+        end_pos = start_pos + np.mod(argmax_idx, span)
+        # pred_si = argmax_idx / opts['span_length']
+        # pred_ei = pred_si + tf.cast(tf.mod(argmax_idx , opts['span_length']), tf.float64)
 
         return start_pos, end_pos
 
