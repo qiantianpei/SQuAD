@@ -211,17 +211,17 @@ class QAModel(object):
         print "GatedAttn"
         with vs.variable_scope("GatedAttn"):
             attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
-            context_hiddens_gated = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
+            context_hiddens_gated, self.a_t = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
 
         print "SelfAttn"
         with vs.variable_scope("SelfAttn"): 
             attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size)
-            attn_output_self = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
+            attn_output_self, self.a_t2 = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
 
         print "Output"
         with vs.variable_scope("Output"): 
             output_layer = PntNet(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
-            self.logits_start, self.probdist_start, self.logits_end, self.probdist_end = output_layer.build_graph(attn_output_self, question_hiddens, self.context_mask, self.qn_mask)
+            self.logits_start, self.probdist_start, self.logits_end, self.probdist_end, self.a = output_layer.build_graph(attn_output_self, question_hiddens, self.context_mask, self.qn_mask)
         # # Use context hidden states to attend to question hidden states
         # attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         # _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
@@ -318,7 +318,7 @@ class QAModel(object):
 
         # Run the model
         [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
-        x = session.run([self.context_hiddens, self.question_hiddens, self.a_t, self.a_t2, self.logits_start = logits_start, self.probdist_start = probdist_start, self.logits_end = logits_end, self.probdist_end], input_feed)
+        x = session.run([self.context_hiddens, self.question_hiddens, self.a_t, self.a_t2, self.logits_start, self.probdist_start, self.logits_end, self.probdist_end, self.a], input_feed)
 
         print x
 

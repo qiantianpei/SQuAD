@@ -324,12 +324,11 @@ class GatedAttn(object):
                         tf.get_variable_scope().reuse_variables()
                     output, QPmatch_state = QP_match_cell(u_tP_c_t_star, QP_match_state)
                     v_P.append(output) # output: (batch_size, hidden_size)
-            self.a_t = a_t
             v_P = tf.stack(v_P, 1)
             #assert v_P.shape[1:] == [keys.shape[1], self.hidden_size]
             #v_P = tf.nn.dropout(v_P, self.keep_prob)
                     
-        return v_P
+        return v_P, a_t
 
 class SelfAttn(object):
     """Module for basic attention.
@@ -401,7 +400,6 @@ class SelfAttn(object):
                 u_tP_c_t_star = tf.squeeze(u_tP_c_t * g_t, [1]) # (batch_size, self.value_vec_size + self.key_vec_size)
 
                 star.append(u_tP_c_t_star)
-            self.a_t2 = a_t
 
             star = tf.stack(star, 1)
             encoder = RNNEncoder(self.hidden_size, self.keep_prob)
@@ -428,7 +426,7 @@ class SelfAttn(object):
 
             # h_P = encoder.build_graph(v_P_c, values_mask) # (batch_size, context_len, hidden_size * 2)
                     
-        return h_P
+        return h_P, a_t
 
 
 class PntNet(object):
@@ -496,7 +494,6 @@ class PntNet(object):
             tanh1 = tf.tanh(W_uQ_u_Q + W_vQ_V_rQ) # (batch_size, q_len, hidden_size * 2)
             s1 = tf.squeeze(tf.tensordot(tanh1, v1, 1), [2]) # (batch_size, q_len)
             _, a = masked_softmax(s1, question_mask, 1)
-            self.a = a
 
             r1 = tf.matmul(tf.expand_dims(a, 1), question)
             r1 = tf.nn.dropout(r1, self.keep_prob) # (batch_size, 1, question_size)
@@ -520,13 +517,8 @@ class PntNet(object):
             tanh3 = tf.tanh(W_ha_r2 + W_hP_h_P2) # (batch_size, c_len, hidden_size)
             s3 = tf.squeeze(tf.tensordot(tanh3, v2, 1), [2]) # (batch_size, c_len)
             logits_end, probdist_end = masked_softmax(s3, context_mask, 1) 
-
-            self.logits_start = logits_start
-            self.probdist_start = probdist_start
-            self.logits_end = logits_end
-            self.probdist_end = probdist_end
                     
-        return logits_start, probdist_start, logits_end, probdist_end
+        return logits_start, probdist_start, logits_end, probdist_end, a
 
 
 def masked_softmax(logits, mask, dim):
