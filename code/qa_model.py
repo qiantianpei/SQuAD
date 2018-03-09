@@ -205,6 +205,8 @@ class QAModel(object):
             encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
             question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
+            self.context_hiddens = context_hiddens
+            self.question_hiddens = question_hiddens
         
         print "GatedAttn"
         with vs.variable_scope("GatedAttn"):
@@ -316,6 +318,9 @@ class QAModel(object):
 
         # Run the model
         [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
+        x = session.run([self.context_hiddens, self.question_hiddens, self.a_t, self.a_t2, self.logits_start = logits_start, self.probdist_start = probdist_start, self.logits_end = logits_end, self.probdist_end], input_feed)
+
+        print x
 
         # All summaries in the graph are added to Tensorboard
         summary_writer.add_summary(summaries, global_step)
