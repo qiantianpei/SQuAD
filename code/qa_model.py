@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, GatedAttn, SelfAttn,PntNet
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, GatedAttn, SelfAttn,PntNet, masked_softmax
 
 logging.basicConfig(level=logging.INFO)
 
@@ -76,7 +76,7 @@ class QAModel(object):
         # Define optimizer and updates
         # (updates is what you need to fetch in session.run to do a gradient update)
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        opt = tf.train.AdadeltaOptimizer(1.0, rho=0.95, epsilon=1e-06)
+        opt = tf.train.AdadeltaOptimizer(0.5, rho=0.999)
         #opt = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate) # you can try other optimizers
         self.updates = opt.apply_gradients(zip(clipped_gradients, params), global_step=self.global_step)
         
@@ -186,42 +186,127 @@ class QAModel(object):
         #     qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         # #####
 
-        print "QPEncoder1"
-        with vs.variable_scope("QPEncoder1"):
-            encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            context_hiddens1 = encoder1.build_graph(self.context_embs, self.context_mask)
-            #context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
-            question_hiddens1 = encoder1.build_graph(self.qn_embs, self.qn_mask)
-            #question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
+        # print "QPEncoder1"
+        # with vs.variable_scope("QPEncoder1"):
+        #     encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+        #     context_hiddens1 = encoder1.build_graph(self.context_embs, self.context_mask)
+        #     #context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
+        #     question_hiddens1 = encoder1.build_graph(self.qn_embs, self.qn_mask)
+        #     #question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
         
-        print "QPEncoder2"
-        with vs.variable_scope("QPEncoder2"):
-            encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            context_hiddens2 = encoder2.build_graph(context_hiddens1, self.context_mask)
-            question_hiddens2 = encoder2.build_graph(question_hiddens1, self.qn_mask)
+        # print "QPEncoder2"
+        # with vs.variable_scope("QPEncoder2"):
+        #     encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+        #     context_hiddens2 = encoder2.build_graph(context_hiddens1, self.context_mask)
+        #     question_hiddens2 = encoder2.build_graph(question_hiddens1, self.qn_mask)
 
-        print "QPEncoder3"
-        with vs.variable_scope("QPEncoder3"):
-            encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
-            question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
-            self.context_hiddens = context_hiddens
-            self.question_hiddens = question_hiddens
+        # print "QPEncoder3"
+        # with vs.variable_scope("QPEncoder3"):
+        #     encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+        #     context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
+        #     question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
+        #     self.context_hiddens = context_hiddens
+        #     self.question_hiddens = question_hiddens
+
+        with vs.variable_scope("Contextual"):
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, 2 * hidden_size)
+            question_hiddens = encoder.build_graph(self.qn_embs, self.qn_mask)
+
+            assert context_hiddens.shape[1:] == [self.FLAGS.context_len, 2 * self.FLAGS.hidden_size]
+            assert question_hiddens.shape[1:] == [self.FLAGS.question_len, 2 * self.FLAGS.hidden_size]
+
+
+        with vs.variable_scope("attention-flow"):
+            w1 = tf.get_variable("w1", shape = [2 * self.FLAGS.hidden_size, 1], initializer=tf.contrib.layers.xavier_initializer())
+            w2 = tf.get_variable("w2", shape = [2 * self.FLAGS.hidden_size, 1], initializer=tf.contrib.layers.xavier_initializer())
+            w3 = tf.get_variable("w3", shape = [2 * self.FLAGS.hidden_size, 1], initializer=tf.contrib.layers.xavier_initializer())
+
+            w1c = self.mat_weight_mul(context_hiddens, w1) # ((batch_size, context_len, 1)
+            assert w1c.shape[1:] == [self.FLAGS.context_len, 1]
+
+            w2q = self.mat_weight_mul(question_hiddens, w2) # ((batch_size, question_len, 1)
+            assert w2q.shape[1:] == [self.FLAGS.question_len, 1]
+
+            cq = tf.expand_dims(context_hiddens, 2) * tf.expand_dims(question_hiddens, 1) # ((batch_size, context_len, question_len, 2 * hidden_size)
+            assert cq.shape[1:] == [self.FLAGS.context_len, self.FLAGS.question_len, 2 * self.FLAGS.hidden_size]
+
+            w3cq = self.mat_weight_mul(tf.reshape(cq, [-1, self.FLAGS.context_len, 2 * self.FLAGS.hidden_size]), w2) # ((batch_size * context_len, question_len, 1)
+            w3cq = tf.reshape(w3cq, [-1, self.FLAGS.context_len, self.FLAGS.question_len]) # ((batch_size, context_len, question_len)
+            assert w3cq.shape[1:] == [self.FLAGS.context_len, self.FLAGS.question_len]
+
+
+            S = w1c + tf.transpose(w2q, perm = [0, 2, 1]) + w3cq # (batch_size, context_len, question_len)
+            assert S.shape[1:] == [self.FLAGS.context_len, self.FLAGS.question_len]
+
+
+
+            attn_logits_mask = tf.expand_dims(self.qn_mask, 1) # shape (batch_size, 1, question_len)
+            _, attn_C2Q = masked_softmax(S, attn_logits_mask, 2) # shape (batch_size, context_len, question_len)
+
+            assert attn_C2Q.shape[1:] == [self.FLAGS.context_len, self.FLAGS.question_len]
+
+            # Use attention distribution to take weighted sum of values
+            a = tf.matmul(attn_C2Q, question_hiddens) # shape (batch_size, context_len, 2 * hidden_size)
+            assert a.shape[1:] == [self.FLAGS.context_len, 2 * self.FLAGS.hidden_size]
+
+            # Apply dropout
+            a = tf.nn.dropout(a, self.keep_prob)
+
+            m = tf.reduce_max(S, axis = 2) # (batch_size, context_len)
+            #m = tf.squeeze(m, [2]) # (batch_size, context_len)
+            assert m.shape[1:] == [self.FLAGS.context_len]
+
+            _, attn_Q2C = masked_softmax(m, self.context_mask, 1) # (batch_size, context_len)
+            attn_Q2C = tf.expand_dims(attn_Q2C, 1) # (batch_size, 1, context_len)
+            assert attn_Q2C.shape[1:] == [1, self.FLAGS.context_len]
+
+            c_prime = tf.matmul(attn_Q2C, context_hiddens) # (batch_size, 1, 2 * hidden_size)
+            #c = tf.tile(c, [1, self.FLAGS.context_len, 1]) # (batch_size, context_len, 2 * hidden_size)
+
+            b = tf.concat([context_hiddens, a, context_hiddens * a, context_hiddens * c_prime], 2) # (batch_size, context_len, 8 * hidden_size)
+            assert b.shape[1:] == [self.FLAGS.context_len, 8 * self.FLAGS.hidden_size]
+
+        with vs.variable_scope("modelling1"):
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            M = encoder.build_graph(b, self.context_mask)
+
+        with vs.variable_scope("modelling2"):
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            M = encoder.build_graph(M, self.context_mask)
+
+        with vs.variable_scope("StartDist"):
+            GM = tf.concat([b, M], 2)
+            assert GM.shape[1:] == [self.FLAGS.context_len, 10 * self.FLAGS.hidden_size]
+
+            softmax_layer_start = SimpleSoftmaxLayer()
+            self.logits_start, self.probdist_start = softmax_layer_start.build_graph(GM, self.context_mask)
+
+        # Use softmax layer to compute probability distribution for end location
+        # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
+        with vs.variable_scope("EndDist"):
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            M2 = encoder.build_graph(M, self.context_mask)
+            GM2 = tf.concat([b, M2], 2)
+            assert GM2.shape[1:] == [self.FLAGS.context_len, 10 * self.FLAGS.hidden_size]
+
+            softmax_layer_end = SimpleSoftmaxLayer()
+            self.logits_end, self.probdist_end = softmax_layer_end.build_graph(GM2, self.context_mask)
         
-        print "GatedAttn"
-        with vs.variable_scope("GatedAttn"):
-            attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
-            context_hiddens_gated, self.a_t = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
+        # print "GatedAttn"
+        # with vs.variable_scope("GatedAttn"):
+        #     attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
+        #     context_hiddens_gated, self.a_t = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
 
-        print "SelfAttn"
-        with vs.variable_scope("SelfAttn"): 
-            attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size)
-            attn_output_self, self.a_t2 = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
+        # print "SelfAttn"
+        # with vs.variable_scope("SelfAttn"): 
+        #     attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size)
+        #     attn_output_self, self.a_t2 = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
 
-        print "Output"
-        with vs.variable_scope("Output"): 
-            output_layer = PntNet(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
-            self.logits_start, self.probdist_start, self.logits_end, self.probdist_end, self.a = output_layer.build_graph(attn_output_self, question_hiddens, self.context_mask, self.qn_mask)
+        # print "Output"
+        # with vs.variable_scope("Output"): 
+        #     output_layer = PntNet(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
+        #     self.logits_start, self.probdist_start, self.logits_end, self.probdist_end, self.a = output_layer.build_graph(attn_output_self, question_hiddens, self.context_mask, self.qn_mask)
         # # Use context hidden states to attend to question hidden states
         # attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
         # _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
@@ -238,8 +323,9 @@ class QAModel(object):
         # Use softmax layer to compute probability distribution for start location
         # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
         # with vs.variable_scope("StartDist"):
+        #     GM = tf.concat([G, M], 2)
         #     softmax_layer_start = SimpleSoftmaxLayer()
-        #     self.logits_start, self.probdist_start = softmax_layer_start.build_graph(blended_reps_final, self.context_mask)
+        #     self.logits_start, self.probdist_start = softmax_layer_start.build_graph(GM, self.context_mask)
 
         # # Use softmax layer to compute probability distribution for end location
         # # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
@@ -247,6 +333,14 @@ class QAModel(object):
         #     softmax_layer_end = SimpleSoftmaxLayer()
         #     self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
+    def mat_weight_mul(self, mat, weight):
+        # [batch_size, n, m] * [m, p] = [batch_size, n, p]
+        mat_shape = mat.get_shape().as_list()
+        weight_shape = weight.get_shape().as_list()
+        assert(mat_shape[-1] == weight_shape[0])
+        mat_reshape = tf.reshape(mat, [-1, mat_shape[-1]]) # [batch_size * n, m]
+        mul = tf.matmul(mat_reshape, weight) # [batch_size * n, p]
+        return tf.reshape(mul, [-1, mat_shape[1], weight_shape[-1]])
 
     def add_loss(self):
         """
@@ -318,9 +412,9 @@ class QAModel(object):
 
         # Run the model
         [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
-        x = session.run([self.context_hiddens, self.question_hiddens, self.a_t, self.a_t2, self.logits_start, self.probdist_start, self.logits_end, self.probdist_end, self.a], input_feed)
+        #x = session.run([self.context_hiddens, self.question_hiddens, self.a_t, self.a_t2, self.logits_start, self.probdist_start, self.logits_end, self.probdist_end, self.a], input_feed)
 
-        print x
+        #print x
 
         # All summaries in the graph are added to Tensorboard
         summary_writer.add_summary(summaries, global_step)
@@ -404,20 +498,18 @@ class QAModel(object):
         start_dist, end_dist = self.get_prob_dists(session, batch)
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
-        #start_pos = np.argmax(start_dist, axis=1)
-        #end_pos = np.argmax(end_dist, axis=1)
+        start_pos = np.argmax(start_dist, axis=1)
+        end_pos = np.argmax(end_dist, axis=1)
 
-        prob = []
-        span = 20
-        for i in range(self.FLAGS.context_len - span):
-            for j in range(span):
-                prob.append(start_dist[:, i] * end_dist[:, i+j])
-        prob = np.stack(prob, axis = 1)
-        argmax_idx = np.argmax(prob, axis=1)
-        start_pos = argmax_idx // span
-        end_pos = start_pos + np.mod(argmax_idx, span)
-        # pred_si = argmax_idx / opts['span_length']
-        # pred_ei = pred_si + tf.cast(tf.mod(argmax_idx , opts['span_length']), tf.float64)
+        # prob = []
+        # span = 20
+        # for i in range(self.FLAGS.context_len - span):
+        #     for j in range(span):
+        #         prob.append(start_dist[:, i] * end_dist[:, i+j])
+        # prob = np.stack(prob, axis = 1)
+        # argmax_idx = np.argmax(prob, axis=1)
+        # start_pos = argmax_idx // span
+        # end_pos = start_pos + np.mod(argmax_idx, span)
 
         return start_pos, end_pos
 

@@ -124,7 +124,6 @@ def padded_c(token_batch_c, sentence_len, word_len):
 def refill_batches(batches, word2id, char2id, context_file, qn_file, ans_file, batch_size, context_len, question_len, word_len, discard_long):
     """
     Adds more batches into the "batches" list.
-
     Inputs:
       batches: list to add batches to
       word2id: dictionary mapping word (string) to word id (int)
@@ -186,7 +185,7 @@ def refill_batches(batches, word2id, char2id, context_file, qn_file, ans_file, b
 
     # Sort by question length
     # Note: if you sort by context length, then you'll have batches which contain the same context many times (because each context appears several times, with different questions)
-    #examples = sorted(examples, key=lambda e: len(e[2]))
+    examples = sorted(examples, key=lambda e: len(e[2]))
 
     # Make into batches and append to the list batches
     for batch_start in xrange(0, len(examples), batch_size):
@@ -197,7 +196,7 @@ def refill_batches(batches, word2id, char2id, context_file, qn_file, ans_file, b
         batches.append((context_ids_batch, context_tokens_batch, context_ids_c_batch, qn_ids_batch, qn_tokens_batch, qn_ids_c_batch, ans_span_batch, ans_tokens_batch))
 
     # shuffle the batches
-    #random.shuffle(batches)
+    random.shuffle(batches)
 
     toc = time.time()
     print "Refilling batches took %.2f seconds" % (toc-tic)
@@ -209,7 +208,6 @@ def get_batch_generator(word2id, char2id, context_path, qn_path, ans_path, batch
     This function returns a generator object that yields batches.
     The last batch in the dataset will be a partial batch.
     Read this to understand generators and the yield keyword in Python: https://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do
-
     Inputs:
       word2id: dictionary mapping word (string) to word id (int)
       context_file, qn_file, ans_file: paths to {train/dev}.{context/question/answer} data files
