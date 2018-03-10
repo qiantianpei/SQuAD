@@ -44,9 +44,9 @@ class RNNEncoder(object):
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_fw = rnn_cell.LSTMCell(self.hidden_size)
         self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
+        self.rnn_cell_bw = rnn_cell.LSTMCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
     def build_graph(self, inputs, masks):
@@ -83,8 +83,8 @@ class SimpleSoftmaxLayer(object):
     and return probability distribution over those states.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, keep_prob):
+        self.keep_prob = keep_prob
 
     def build_graph(self, inputs, masks):
         """
@@ -108,6 +108,7 @@ class SimpleSoftmaxLayer(object):
             # Linear downprojection layer
             logits = tf.contrib.layers.fully_connected(inputs, num_outputs=1, activation_fn=None) # shape (batch_size, seq_len, 1)
             logits = tf.squeeze(logits, axis=[2]) # shape (batch_size, seq_len)
+            logits = tf.nn.dropout(logits, self.keep_prob)
 
             # Take softmax over sequence
             masked_logits, prob_dist = masked_softmax(logits, masks, 1)

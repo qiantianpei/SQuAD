@@ -15,7 +15,7 @@
 """This file defines the top-level model"""
 
 from __future__ import absolute_import
-from __future__ import division
+from __future__ import division 
 
 import time
 import logging
@@ -186,28 +186,6 @@ class QAModel(object):
         #     qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         # #####
 
-        # print "QPEncoder1"
-        # with vs.variable_scope("QPEncoder1"):
-        #     encoder1 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        #     context_hiddens1 = encoder1.build_graph(self.context_embs, self.context_mask)
-        #     #context_hiddens1 = encoder1.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, hidden_size*2)
-        #     question_hiddens1 = encoder1.build_graph(self.qn_embs, self.qn_mask)
-        #     #question_hiddens1 = encoder1.build_graph(qn_embs_concat, self.qn_mask) # (batch_size, question_len, hidden_size*2)
-        
-        # print "QPEncoder2"
-        # with vs.variable_scope("QPEncoder2"):
-        #     encoder2 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        #     context_hiddens2 = encoder2.build_graph(context_hiddens1, self.context_mask)
-        #     question_hiddens2 = encoder2.build_graph(question_hiddens1, self.qn_mask)
-
-        # print "QPEncoder3"
-        # with vs.variable_scope("QPEncoder3"):
-        #     encoder3 = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-        #     context_hiddens = encoder3.build_graph(context_hiddens2, self.context_mask)
-        #     question_hiddens = encoder3.build_graph(question_hiddens2, self.qn_mask)
-        #     self.context_hiddens = context_hiddens
-        #     self.question_hiddens = question_hiddens
-
         with vs.variable_scope("Contextual"):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             context_hiddens = encoder.build_graph(self.context_embs, self.context_mask) # (batch_size, context_len, 2 * hidden_size)
@@ -262,6 +240,7 @@ class QAModel(object):
             assert attn_Q2C.shape[1:] == [1, self.FLAGS.context_len]
 
             c_prime = tf.matmul(attn_Q2C, context_hiddens) # (batch_size, 1, 2 * hidden_size)
+            c_prime = tf.nn.dropout(c_prime, self.keep_prob)
             #c = tf.tile(c, [1, self.FLAGS.context_len, 1]) # (batch_size, context_len, 2 * hidden_size)
 
             b = tf.concat([context_hiddens, a, context_hiddens * a, context_hiddens * c_prime], 2) # (batch_size, context_len, 8 * hidden_size)
@@ -279,7 +258,7 @@ class QAModel(object):
             GM = tf.concat([b, M], 2)
             assert GM.shape[1:] == [self.FLAGS.context_len, 10 * self.FLAGS.hidden_size]
 
-            softmax_layer_start = SimpleSoftmaxLayer()
+            softmax_layer_start = SimpleSoftmaxLayer(self.keep_prob)
             self.logits_start, self.probdist_start = softmax_layer_start.build_graph(GM, self.context_mask)
 
         # Use softmax layer to compute probability distribution for end location
@@ -290,48 +269,9 @@ class QAModel(object):
             GM2 = tf.concat([b, M2], 2)
             assert GM2.shape[1:] == [self.FLAGS.context_len, 10 * self.FLAGS.hidden_size]
 
-            softmax_layer_end = SimpleSoftmaxLayer()
+            softmax_layer_end = SimpleSoftmaxLayer(self.keep_prob)
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(GM2, self.context_mask)
         
-        # print "GatedAttn"
-        # with vs.variable_scope("GatedAttn"):
-        #     attn_layer_gated = GatedAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
-        #     context_hiddens_gated, self.a_t = attn_layer_gated.build_graph(question_hiddens, self.qn_mask, context_hiddens) # (batch_size, context_len, hidden_size)
-
-        # print "SelfAttn"
-        # with vs.variable_scope("SelfAttn"): 
-        #     attn_layer_self = SelfAttn(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size)
-        #     attn_output_self, self.a_t2 = attn_layer_self.build_graph(context_hiddens_gated, self.context_mask) # (batch_size, context_len, hidden_size * 2)
-
-        # print "Output"
-        # with vs.variable_scope("Output"): 
-        #     output_layer = PntNet(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size)
-        #     self.logits_start, self.probdist_start, self.logits_end, self.probdist_end, self.a = output_layer.build_graph(attn_output_self, question_hiddens, self.context_mask, self.qn_mask)
-        # # Use context hidden states to attend to question hidden states
-        # attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-        # _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
-
-        # Concat attn_output to context_hiddens to get blended_reps
-        #blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
-
-        # Apply fully connected layer to each blended representation
-        # Note, blended_reps_final corresponds to b' in the handout
-        # Note, tf.contrib.layers.fully_connected applies a ReLU non-linarity here by default
-        
-        #blended_reps_final = tf.contrib.layers.fully_connected(blended_reps, num_outputs=self.FLAGS.hidden_size) # blended_reps_final is shape (batch_size, context_len, hidden_size)
-        # blended_reps_final = tf.contrib.layers.fully_connected(context_hiddens_self, num_outputs=self.FLAGS.hidden_size) 
-        # Use softmax layer to compute probability distribution for start location
-        # Note this produces self.logits_start and self.probdist_start, both of which have shape (batch_size, context_len)
-        # with vs.variable_scope("StartDist"):
-        #     GM = tf.concat([G, M], 2)
-        #     softmax_layer_start = SimpleSoftmaxLayer()
-        #     self.logits_start, self.probdist_start = softmax_layer_start.build_graph(GM, self.context_mask)
-
-        # # Use softmax layer to compute probability distribution for end location
-        # # Note this produces self.logits_end and self.probdist_end, both of which have shape (batch_size, context_len)
-        # with vs.variable_scope("EndDist"):
-        #     softmax_layer_end = SimpleSoftmaxLayer()
-        #     self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
     def mat_weight_mul(self, mat, weight):
         # [batch_size, n, m] * [m, p] = [batch_size, n, p]
@@ -478,6 +418,7 @@ class QAModel(object):
         #####
 
         output_feed = [self.probdist_start, self.probdist_end]
+        #print session.run(output_feed, input_feed)
         [probdist_start, probdist_end] = session.run(output_feed, input_feed)
         return probdist_start, probdist_end
 
