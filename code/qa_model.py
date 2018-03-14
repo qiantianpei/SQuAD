@@ -169,6 +169,8 @@ class QAModel(object):
             context_embs_c = tf.reshape(context_embs_c_pool, [-1, self.FLAGS.context_len, self.FLAGS.filters]) # shape (batch_size , context_len, filters)
             #assert context_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.context_len, self.FLAGS.filters]
 
+            context_embs_c = tf.nn.dropout(context_embs_c, self.keep_prob)
+
             #tf.get_variable_scope().reuse_variables()
             qn_embs_c_raw = tf.reshape(self.qn_embs_c_raw, [-1, self.FLAGS.word_len, self.FLAGS.embedding_size_c]) # shape (batch_size * question_len, word_len, embedding_size)
             qn_embs_c_raw = tf.nn.dropout(qn_embs_c_raw, self.keep_prob)
@@ -181,10 +183,14 @@ class QAModel(object):
 
             qn_embs_c = tf.reshape(qn_embs_c_pool, [-1, self.FLAGS.question_len, self.FLAGS.filters]) # shape (batch_size , question_len, filters)
             #assert qn_embs_c.shape == [self.FLAGS.batch_size, self.FLAGS.question_len, self.FLAGS.filters]
+            qn_embs_c = tf.nn.dropout(qn_embs_c, self.keep_prob)
 
             context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
             qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         #####
+
+        with vs.variable_scope("highway"):
+            H = tf.contrib.layers.fully_connected(context_embs_concat, num_outputs = )
 
         with vs.variable_scope("Contextual"):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
@@ -253,6 +259,32 @@ class QAModel(object):
         with vs.variable_scope("modelling2"):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             M = encoder.build_graph(M, self.context_mask)
+
+        # with vs.variable_scope("selfAttn"):
+        #     W_vP1 = tf.get_variable('W_vP1', shape = [self.hidden_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+        #     W_vP2 = tf.get_variable('W_VP2', shape = [self.hidden_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+        #     v = tf.get_variable('v', shape = [self.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+
+        #     W_vP1_v_P = tf.expand_dims(self.mat_weight_mul(M, W_vP1), 1) # (batch_size, 1, context_len, hidden_size)
+        #     W_vP2_v_P = tf.expand_dims(self.mat_weight_mul(M, W_vP1), 2) # (batch_size, context_len, 1, hidden_size)
+
+        #     tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P) # (batch_size, context_len, context_len, hidden_size)
+        #     s = tf.tensordot(tanh, v) # (batch_size, context_len, context_len, 1)
+
+        #     s = self.mat_weight_mul(tf.reshape(s, [-1, self.FLAGS.context_len, self.FLAGS.hidden_size]), v) # (batch_size * context_len, context_len, 1)
+        #     s = tf.reshape(s, [-1, self.FLAGS.context_len, self.FLAGS.question_len]) # (batch_size * context_len, context_len)
+
+        #     self_mask = tf.expand_dims(self.context_mask, 1) # shape (batch_size, 1, hidden_size)
+        #     _, a = masked_softmax(S, self_mask, 2) # shape (batch_size, context_len, hidden_size)
+
+        #     c = tf.matmul(a, M)
+        #     c = tf.nn.dropout(c, self.keep_prob)
+        #     Mc = tf.concat([M, c], 2) # (batch_size, context_len, hidden_size * 2)
+
+        #     encoder = RNNEncoder(self.hidden_size, self.keep_prob)
+
+        #     M = encoder.build_graph(Mc, self.context_mask) # (batch_size, context_len, hidden_size)
+
 
         with vs.variable_scope("StartDist"):
             GM = tf.concat([b, M], 2)
