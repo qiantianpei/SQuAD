@@ -189,9 +189,6 @@ class QAModel(object):
             qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
         #####
 
-        with vs.variable_scope("highway"):
-            H = tf.contrib.layers.fully_connected(context_embs_concat, num_outputs = )
-
         with vs.variable_scope("Contextual"):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             context_hiddens = encoder.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, 2 * hidden_size)
