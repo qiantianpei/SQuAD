@@ -187,12 +187,37 @@ class QAModel(object):
 
             context_embs_concat = tf.concat([self.context_embs, context_embs_c], axis = 2) # shape (batch_size , context_len, embedding_size + filters)
             qn_embs_concat = tf.concat([self.qn_embs, qn_embs_c], axis = 2) # shape (batch_size , question_len, embedding_size + filters)
+
+            assert context_embs_concat.shape[1:] == [self.FLAGS.context_len, self.FLAGS.filters + self.FLAGS.embedding_size]
+            assert qn_embs_concat.shape[1:] == [self.FLAGS.question_len, self.FLAGS.filters + self.FLAGS.embedding_size]
         #####
+
+        with vs.variable_scope("highway"):
+            n = self.FLAGS.filters + self.FLAGS.embedding_size
+            context_H1 = tf.contrib.layers.fully_connected(context_embs_concat, num_outputs = n, activation_fn = tf.tanh, scope = 'H1', reuse = None)
+            context_T1 = tf.contrib.layers.fully_connected(context_embs_concat, num_outputs = n, activation_fn = tf.tanh, scope = 'T1', reuse = None)
+            
+            context_embs1 = context_H1 * context_T1 + context_embs_concat * (1 - context_T1)
+
+            context_H2 = tf.contrib.layers.fully_connected(context_embs1, num_outputs = n, activation_fn = tf.tanh, scope = 'H2', reuse = None)
+            context_T2 = tf.contrib.layers.fully_connected(context_embs1, num_outputs = n, activation_fn = tf.tanh, scope = 'T2', reuse = None)
+
+            context_embs2 = context_H2 * context_T2 + context_embs1 * (1 - context_T2)
+
+            qn_H1 = tf.contrib.layers.fully_connected(qn_embs_concat, num_outputs = n, activation_fn = tf.tanh, scope = 'H1', reuse = True)
+            qn_T1 = tf.contrib.layers.fully_connected(qn_embs_concat, num_outputs = n, activation_fn = tf.tanh, scope = 'T1', reuse = True)
+            
+            qn_embs1 = qn_H1 * qn_T1 + qn_embs_concat * (1 - qn_T1)
+
+            qn_H2 = tf.contrib.layers.fully_connected(qn_embs1, num_outputs = n, activation_fn = tf.tanh, scope = 'H2', reuse = True)
+            qn_T2 = tf.contrib.layers.fully_connected(qn_embs1, num_outputs = n, activation_fn = tf.tanh, scope = 'T2', reuse = True)
+
+            qn_embs2 = qn_H2 * qn_T2 + qn_embs1 * (1 - qn_T2)
 
         with vs.variable_scope("Contextual"):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
-            context_hiddens = encoder.build_graph(context_embs_concat, self.context_mask) # (batch_size, context_len, 2 * hidden_size)
-            question_hiddens = encoder.build_graph(qn_embs_concat, self.qn_mask)
+            context_hiddens = encoder.build_graph(context_embs2, self.context_mask) # (batch_size, context_len, 2 * hidden_size)
+            question_hiddens = encoder.build_graph(qn_embs2, self.qn_mask)
 
             assert context_hiddens.shape[1:] == [self.FLAGS.context_len, 2 * self.FLAGS.hidden_size]
             assert question_hiddens.shape[1:] == [self.FLAGS.question_len, 2 * self.FLAGS.hidden_size]
