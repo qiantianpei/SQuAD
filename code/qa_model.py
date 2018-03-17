@@ -256,33 +256,36 @@ class QAModel(object):
 
 
         with vs.variable_scope("selfAttn"):
-            W_vP1 = tf.get_variable('W_vP1', shape = [2 * self.FLAGS.hidden_size, self.FLAGS.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
-            W_vP2 = tf.get_variable('W_VP2', shape = [2 * self.FLAGS.hidden_size, self.FLAGS.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
-            v = tf.get_variable('v', shape = [self.FLAGS.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
+            # W_vP1 = tf.get_variable('W_vP1', shape = [2 * self.FLAGS.hidden_size, self.FLAGS.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            # W_vP2 = tf.get_variable('W_VP2', shape = [2 * self.FLAGS.hidden_size, self.FLAGS.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
+            # v = tf.get_variable('v', shape = [self.FLAGS.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
 
-            W_vP1_v_P = tf.expand_dims(self.mat_weight_mul(M, W_vP1), 1) # (batch_size, 1, context_len, hidden_size)
-            W_vP2_v_P = tf.expand_dims(self.mat_weight_mul(M, W_vP1), 2) # (batch_size, context_len, 1, hidden_size)
+            # W_vP1_v_P = tf.expand_dims(self.mat_weight_mul(M, W_vP1), 1) # (batch_size, 1, context_len, hidden_size)
+            # W_vP2_v_P = tf.expand_dims(self.mat_weight_mul(M, W_vP1), 2) # (batch_size, context_len, 1, hidden_size)
 
-            tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P) # (batch_size, context_len, context_len, hidden_size)
-            assert tanh.shape[1:] == [self.FLAGS.context_len, self.FLAGS.context_len, self.FLAGS.hidden_size]
+            # tanh = tf.tanh(W_vP1_v_P + W_vP2_v_P) # (batch_size, context_len, context_len, hidden_size)
+            # assert tanh.shape[1:] == [self.FLAGS.context_len, self.FLAGS.context_len, self.FLAGS.hidden_size]
 
-            s = self.mat_weight_mul(tf.reshape(tanh, [-1, self.FLAGS.context_len, self.FLAGS.hidden_size]), v) # (batch_size * context_len, context_len, 1)
-            s = tf.reshape(s, [-1, self.FLAGS.context_len, self.FLAGS.context_len]) # (batch_size, context_len, context_len)
-            assert s.shape[1:] == [self.FLAGS.context_len, self.FLAGS.context_len]
+            # s = self.mat_weight_mul(tf.reshape(tanh, [-1, self.FLAGS.context_len, self.FLAGS.hidden_size]), v) # (batch_size * context_len, context_len, 1)
+            # s = tf.reshape(s, [-1, self.FLAGS.context_len, self.FLAGS.context_len]) # (batch_size, context_len, context_len)
+            # assert s.shape[1:] == [self.FLAGS.context_len, self.FLAGS.context_len]
 
-            self_mask = tf.expand_dims(self.context_mask, 1) # shape (batch_size, 1, context_len)
-            _, a = masked_softmax(s, self_mask, 2) # shape (batch_size, context_len, context_len)
-            assert a.shape[1:] == [self.FLAGS.context_len, self.FLAGS.context_len]
+            # self_mask = tf.expand_dims(self.context_mask, 1) # shape (batch_size, 1, context_len)
+            # _, a = masked_softmax(s, self_mask, 2) # shape (batch_size, context_len, context_len)
+            # assert a.shape[1:] == [self.FLAGS.context_len, self.FLAGS.context_len]
 
-            c = tf.matmul(a, M)
-            c = tf.nn.dropout(c, self.keep_prob)
-            Mc = tf.concat([M, c], 2) # (batch_size, context_len, hidden_size * 4)
-            assert Mc.shape[1:] == [self.FLAGS.context_len, 4 * self.FLAGS.hidden_size]
+            # c = tf.matmul(a, M)
+            # c = tf.nn.dropout(c, self.keep_prob)
+            # Mc = tf.concat([M, c], 2) # (batch_size, context_len, hidden_size * 4)
+            # assert Mc.shape[1:] == [self.FLAGS.context_len, 4 * self.FLAGS.hidden_size]
 
-            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            # encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
 
-            M = encoder.build_graph(Mc, self.context_mask) # (batch_size, context_len, hidden_size * 2)
-            assert M.shape[1:] == [self.FLAGS.context_len, 2 * self.FLAGS.hidden_size]
+            # M = encoder.build_graph(Mc, self.context_mask) # (batch_size, context_len, hidden_size * 2)
+            # assert M.shape[1:] == [self.FLAGS.context_len, 2 * self.FLAGS.hidden_size]
+
+            attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            _, M = attn_layer.build_graph(M, self.context_mask, M)
 
         with vs.variable_scope("StartDist"):
             GM = tf.concat([b, M], 2)
