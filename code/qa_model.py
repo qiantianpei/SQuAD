@@ -221,6 +221,7 @@ class QAModel(object):
 
             attn_logits_mask = tf.expand_dims(self.qn_mask, 1) # shape (batch_size, 1, question_len)
             _, attn_C2Q = masked_softmax(S, attn_logits_mask, 2) # shape (batch_size, context_len, question_len)
+            self.attn_C2Q = attn_C2Q
 
             assert attn_C2Q.shape[1:] == [self.FLAGS.context_len, self.FLAGS.question_len]
 
@@ -238,6 +239,7 @@ class QAModel(object):
             _, attn_Q2C = masked_softmax(m, self.context_mask, 1) # (batch_size, context_len)
             attn_Q2C = tf.expand_dims(attn_Q2C, 1) # (batch_size, 1, context_len)
             assert attn_Q2C.shape[1:] == [1, self.FLAGS.context_len]
+            self.attn_Q2C = attn_Q2C
 
             c_prime = tf.matmul(attn_Q2C, context_hiddens) # (batch_size, 1, 2 * hidden_size)
             c_prime = tf.nn.dropout(c_prime, self.keep_prob)
@@ -255,7 +257,7 @@ class QAModel(object):
             M = encoder.build_graph(M, self.context_mask)
 
 
-        with vs.variable_scope("selfAttn"):
+        # with vs.variable_scope("selfAttn"):
             # W_vP1 = tf.get_variable('W_vP1', shape = [2 * self.FLAGS.hidden_size, self.FLAGS.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             # W_vP2 = tf.get_variable('W_VP2', shape = [2 * self.FLAGS.hidden_size, self.FLAGS.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
             # v = tf.get_variable('v', shape = [self.FLAGS.hidden_size, 1],  initializer = tf.contrib.layers.xavier_initializer())
@@ -284,8 +286,8 @@ class QAModel(object):
             # M = encoder.build_graph(Mc, self.context_mask) # (batch_size, context_len, hidden_size * 2)
             # assert M.shape[1:] == [self.FLAGS.context_len, 2 * self.FLAGS.hidden_size]
 
-            attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            _, M = attn_layer.build_graph(M, self.context_mask, M)
+            # attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            # _, M = attn_layer.build_graph(M, self.context_mask, M)
 
         with vs.variable_scope("StartDist"):
             GM = tf.concat([b, M], 2)
@@ -455,6 +457,34 @@ class QAModel(object):
         [probdist_start, probdist_end] = session.run(output_feed, input_feed)
         return probdist_start, probdist_end
 
+    def get_attn(self, session, batch):
+        """
+        Run forward-pass only; get probability distributions for start and end positions.
+
+        Inputs:
+          session: TensorFlow session
+          batch: Batch object
+
+        Returns:
+          probdist_start and probdist_end: both shape (batch_size, context_len)
+        """
+        input_feed = {}
+        input_feed[self.context_ids] = batch.context_ids
+        input_feed[self.context_mask] = batch.context_mask
+        input_feed[self.qn_ids] = batch.qn_ids
+        input_feed[self.qn_mask] = batch.qn_mask
+        # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
+
+        ##### my change
+        input_feed[self.context_ids_c] = batch.context_ids_c
+        input_feed[self.qn_ids_c] = batch.qn_ids_c
+        #####
+
+        output_feed = [self.attn_C2Q, self.attn_Q2C]
+        #print session.run(output_feed, input_feed)
+        [attn_C2Q, attn_Q2C] = session.run(output_feed, input_feed)
+        return attn_C2Q, attn_Q2C
+
 
     def get_start_end_pos(self, session, batch):
         """
@@ -568,12 +598,21 @@ class QAModel(object):
             context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=False):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
+            probdist_start, probdist_end = self.get_prob_dists(session, batch)
+
+            attn_C2Q ,attn_Q2C = self.get_attn(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size
             pred_end_pos = pred_end_pos.tolist() # list length batch_size
 
-            for ex_idx, (pred_ans_start, pred_ans_end, true_ans_tokens) in enumerate(zip(pred_start_pos, pred_end_pos, batch.ans_tokens)):
+            attn_C2Q = attn_C2Q.tolist()
+            attn_Q2C = attn_Q2C.tolist()
+
+            probdist_start = probdist_start.tolist()
+            probdist_end = probdist_end.tolist()
+
+            for ex_idx, (pred_ans_start, pred_ans_end, prob_ans_start, prob_ans_end, C2Q, Q2C, true_ans_tokens) in enumerate(zip(pred_start_pos, pred_end_pos, probdist_start, probdist_end, attn_C2Q, attn_Q2C, batch.ans_tokens)):
                 example_num += 1
 
                 # Get the predicted answer
@@ -594,6 +633,20 @@ class QAModel(object):
                 # Optionally pretty-print
                 if print_to_screen:
                     print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em)
+                    print "C2Q"
+                    print C2Q
+                    print 
+                    print 
+                    print "Q2C"
+                    print Q2C
+                    print 
+                    print
+                    print "prob_start"
+                    print prob_ans_start 
+                    print 
+                    print
+                    print "prob_end"
+                    print prob_ans_end
 
                 if num_samples != 0 and example_num >= num_samples:
                     break
