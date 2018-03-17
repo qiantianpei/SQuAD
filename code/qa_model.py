@@ -30,7 +30,7 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, GatedAttn, SelfAttn,PntNet, masked_softmax
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, MultiAttn, SelfAttn,PntNet, masked_softmax
 
 logging.basicConfig(level=logging.INFO)
 
@@ -217,8 +217,6 @@ class QAModel(object):
             S = w1c + tf.transpose(w2q, perm = [0, 2, 1]) + w3cq # (batch_size, context_len, question_len)
             assert S.shape[1:] == [self.FLAGS.context_len, self.FLAGS.question_len]
 
-
-
             attn_logits_mask = tf.expand_dims(self.qn_mask, 1) # shape (batch_size, 1, question_len)
             _, attn_C2Q = masked_softmax(S, attn_logits_mask, 2) # shape (batch_size, context_len, question_len)
             self.attn_C2Q = attn_C2Q
@@ -245,8 +243,12 @@ class QAModel(object):
             c_prime = tf.nn.dropout(c_prime, self.keep_prob)
             #c = tf.tile(c, [1, self.FLAGS.context_len, 1]) # (batch_size, context_len, 2 * hidden_size)
 
-            b = tf.concat([context_hiddens, a, context_hiddens * a, context_hiddens * c_prime], 2) # (batch_size, context_len, 8 * hidden_size)
-            assert b.shape[1:] == [self.FLAGS.context_len, 8 * self.FLAGS.hidden_size]
+            # self_attn
+            self_attn = MultiAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            _, d = self_attn.build_graph(context_hiddens, self.context_mask, context_hiddens)
+
+            b = tf.concat([context_hiddens, a, context_hiddens * a, context_hiddens * c_prime, d], 2) # (batch_size, context_len, 10 * hidden_size)
+            assert b.shape[1:] == [self.FLAGS.context_len, 10 * self.FLAGS.hidden_size]
 
         with vs.variable_scope("modelling1"):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
@@ -291,7 +293,7 @@ class QAModel(object):
 
         with vs.variable_scope("StartDist"):
             GM = tf.concat([b, M], 2)
-            assert GM.shape[1:] == [self.FLAGS.context_len, 10 * self.FLAGS.hidden_size]
+            assert GM.shape[1:] == [self.FLAGS.context_len, 12 * self.FLAGS.hidden_size]
 
             softmax_layer_start = SimpleSoftmaxLayer(self.keep_prob)
             self.logits_start, self.probdist_start = softmax_layer_start.build_graph(GM, self.context_mask)
@@ -302,7 +304,7 @@ class QAModel(object):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             M2 = encoder.build_graph(M, self.context_mask)
             GM2 = tf.concat([b, M2], 2)
-            assert GM2.shape[1:] == [self.FLAGS.context_len, 10 * self.FLAGS.hidden_size]
+            assert GM2.shape[1:] == [self.FLAGS.context_len, 12 * self.FLAGS.hidden_size]
 
             softmax_layer_end = SimpleSoftmaxLayer(self.keep_prob)
             self.logits_end, self.probdist_end = softmax_layer_end.build_graph(GM2, self.context_mask)
@@ -598,21 +600,21 @@ class QAModel(object):
             context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, word_len=self.FLAGS.word_len, discard_long=False):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
-            probdist_start, probdist_end = self.get_prob_dists(session, batch)
-
-            attn_C2Q ,attn_Q2C = self.get_attn(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size
             pred_end_pos = pred_end_pos.tolist() # list length batch_size
 
-            attn_C2Q = attn_C2Q.tolist()
-            attn_Q2C = attn_Q2C.tolist()
 
-            probdist_start = probdist_start.tolist()
-            probdist_end = probdist_end.tolist()
+            # probdist_start, probdist_end = self.get_prob_dists(session, batch)
+            # attn_C2Q ,attn_Q2C = self.get_attn(session, batch)
+            # attn_C2Q = attn_C2Q.tolist()
+            # attn_Q2C = attn_Q2C.tolist()
+            # probdist_start = probdist_start.tolist()
+            # probdist_end = probdist_end.tolist()
 
-            for ex_idx, (pred_ans_start, pred_ans_end, prob_ans_start, prob_ans_end, C2Q, Q2C, true_ans_tokens) in enumerate(zip(pred_start_pos, pred_end_pos, probdist_start, probdist_end, attn_C2Q, attn_Q2C, batch.ans_tokens)):
+            #for ex_idx, (pred_ans_start, pred_ans_end, prob_ans_start, prob_ans_end, C2Q, Q2C, true_ans_tokens) in enumerate(zip(pred_start_pos, pred_end_pos, probdist_start, probdist_end, attn_C2Q, attn_Q2C, batch.ans_tokens)):
+            for ex_idx, (pred_ans_start, pred_ans_end, true_ans_tokens) in enumerate(zip(pred_start_pos, pred_end_pos, batch.ans_tokens)):
                 example_num += 1
 
                 # Get the predicted answer
@@ -633,20 +635,20 @@ class QAModel(object):
                 # Optionally pretty-print
                 if print_to_screen:
                     print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em)
-                    print "C2Q"
-                    print C2Q
-                    print 
-                    print 
-                    print "Q2C"
-                    print Q2C
-                    print 
-                    print
-                    print "prob_start"
-                    print prob_ans_start 
-                    print 
-                    print
-                    print "prob_end"
-                    print prob_ans_end
+                    # print "C2Q"
+                    # print C2Q
+                    # print 
+                    # print 
+                    # print "Q2C"
+                    # print Q2C
+                    # print 
+                    # print
+                    # print "prob_start"
+                    # print prob_ans_start 
+                    # print 
+                    # print
+                    # print "prob_end"
+                    # print prob_ans_end
 
                 if num_samples != 0 and example_num >= num_samples:
                     break

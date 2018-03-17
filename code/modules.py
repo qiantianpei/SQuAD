@@ -224,11 +224,11 @@ class MultiAttn(object):
 
             # Calculate attention distribution
             W = tf.get_variable('W', shape = [self.key_vec_size, self.value_vec_size], initializer=tf.contrib.layers.xavier_initializer()) # (key_vec_size, value_vec_size)
-            W = tf.expand_dims(W, 0) # (1, key_vec_size, value_vec_size)
-            W = tf.tile(W, [tf.shape(values)[0], 1, 1]) # (batch_size, key_vec_size, value_vec_size)
+            #W = tf.expand_dims(W, 0) # (1, key_vec_size, value_vec_size)
+            #W = tf.tile(W, [tf.shape(values)[0], 1, 1]) # (batch_size, key_vec_size, value_vec_size)
 
             values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            attn_logits = tf.matmul(tf.matmul(keys, W), values_t) / tf.sqrt(self.key_vec_size * 1.) # shape (batch_size, num_keys, num_values)
+            attn_logits = tf.matmul(mat_weight_mul(keys, W), values_t) # shape (batch_size, num_keys, num_values)
             attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
             _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
 
@@ -545,3 +545,12 @@ def masked_softmax(logits, mask, dim):
     masked_logits = tf.add(logits, exp_mask) # where there's padding, set logits to -large
     prob_dist = tf.nn.softmax(masked_logits, dim)
     return masked_logits, prob_dist
+
+def mat_weight_mul(mat, weight):
+        # [batch_size, n, m] * [m, p] = [batch_size, n, p]
+        mat_shape = mat.get_shape().as_list()
+        weight_shape = weight.get_shape().as_list()
+        assert(mat_shape[-1] == weight_shape[0])
+        mat_reshape = tf.reshape(mat, [-1, mat_shape[-1]]) # [batch_size * n, m]
+        mul = tf.matmul(mat_reshape, weight) # [batch_size * n, p]
+        return tf.reshape(mul, [-1, mat_shape[1], weight_shape[-1]])
