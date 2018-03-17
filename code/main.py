@@ -67,7 +67,7 @@ tf.app.flags.DEFINE_integer("keep", 1, "How many checkpoints to keep. 0 indicate
 
 # Reading and saving data
 tf.app.flags.DEFINE_string("train_dir", "", "Training directory to save the model parameters and other info. Defaults to experiments/{experiment_name}")
-tf.app.flags.DEFINE_string("glove_path", "", "Path to glove .txt file. Defaults to data/glove.840B.300d.txt")
+tf.app.flags.DEFINE_string("glove_path", "", "Path to glove .txt file. Defaults to data/glove.6B.{embedding_size}d.txt")
 tf.app.flags.DEFINE_string("data_dir", DEFAULT_DATA_DIR, "Where to find preprocessed SQuAD data for training. Defaults to data/")
 tf.app.flags.DEFINE_string("ckpt_load_dir", "", "For official_eval mode, which directory to load the checkpoint fron. You need to specify this for official_eval mode.")
 tf.app.flags.DEFINE_string("json_in_path", "", "For official_eval mode, path to JSON input file. You need to specify this for official_eval_mode.")
@@ -126,7 +126,7 @@ def main(unused_argv):
     bestmodel_dir = os.path.join(FLAGS.train_dir, "best_checkpoint")
 
     # Define path for glove vecs
-    FLAGS.glove_path = FLAGS.glove_path or os.path.join(DEFAULT_DATA_DIR, "glove.840B.300d.txt".format(FLAGS.embedding_size))
+    FLAGS.glove_path = FLAGS.glove_path or os.path.join(DEFAULT_DATA_DIR, "glove.6B.{}d.txt".format(FLAGS.embedding_size))
 
     # Load embedding matrix and vocab mappings
     emb_matrix, word2id, id2word, char2id, id2char = get_glove(FLAGS.glove_path, FLAGS.embedding_size, FLAGS.embedding_size_c)
