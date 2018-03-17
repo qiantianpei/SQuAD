@@ -257,6 +257,10 @@ class QAModel(object):
             encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
             M = encoder.build_graph(M, self.context_mask)
 
+        with vs.variable_scope("modelling3"):
+            encoder = RNNEncoder(self.FLAGS.hidden_size, self.keep_prob)
+            M = encoder.build_graph(M, self.context_mask)
+
         # with vs.variable_scope("selfAttn"):
         #     W_vP1 = tf.get_variable('W_vP1', shape = [self.hidden_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
         #     W_vP2 = tf.get_variable('W_VP2', shape = [self.hidden_size, self.hidden_size], initializer = tf.contrib.layers.xavier_initializer())
